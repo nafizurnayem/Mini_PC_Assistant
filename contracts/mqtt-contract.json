@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": 1,
+  "topicRoot": "pcbot/v1/{deviceId}",
+  "topics": {
+    "powerCommand": "command/power",
+    "speedTestCommand": "command/speedtest",
+    "resetCommand": "command/reset",
+    "pcState": "state/pc",
+    "botState": "state/bot",
+    "speedTestState": "state/speedtest",
+    "telemetry": "telemetry/system",
+    "alert": "event/alert",
+    "ack": "event/ack"
+  },
+  "command": {
+    "required": ["commandId", "source", "action", "issuedAt", "expiresAt"],
+    "sources": ["mobile", "home-assistant", "google-home", "bot", "tray"],
+    "actions": ["on", "off", "toggle", "run", "wifi", "factory"]
+  },
+  "telemetry": {
+    "required": ["timestamp", "cpu", "gpu", "memory", "storage", "network", "uptimeSeconds"]
+  },
+  "defaults": {
+    "commandTtlSeconds": 30,
+    "telemetryIntervalSeconds": 5,
+    "telemetryLossSeconds": 30,
+    "alertSustainSeconds": 15,
+    "alertCooldownSeconds": 300,
+    "idleSleepSeconds": 60,
+    "thresholds": {
+      "cpuTempC": 90,
+      "gpuTempC": 88,
+      "driveTempC": 70,
+      "memoryUsedPercent": 95,
+      "driveFreePercent": 10,
+      "hysteresis": 5
+    }
+  }
+}
+
