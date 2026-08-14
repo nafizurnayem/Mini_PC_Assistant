@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text.Json;
@@ -10,9 +10,12 @@ using PcBot.Core;
 namespace PcBot.Tray;
 
 /// <summary>
-/// Desktop companion for Pico Assistant. A live dashboard first, settings
+/// Desktop companion for Pico Assistant: a live dashboard first, settings
 /// behind it, and a background agent that keeps publishing while the window is
 /// closed to the notification area.
+///
+/// Every page is built from auto-sizing tables so the layout holds together at
+/// any display scaling and with any text length.
 /// </summary>
 public sealed class MainForm : Form
 {
@@ -35,66 +38,68 @@ public sealed class MainForm : Form
     private readonly Label _status = new()
     {
         AutoSize = true, Text = "Ready", ForeColor = UiTheme.TextSoft, Font = UiTheme.Body,
+        Margin = new Padding(0),
     };
     private readonly Label _network = new()
     {
-        AutoSize = true, MaximumSize = new Size(560, 0), ForeColor = UiTheme.TextSoft, Font = UiTheme.Body,
+        AutoSize = true, ForeColor = UiTheme.TextSoft, Font = UiTheme.Body,
+        Margin = new Padding(0), Dock = DockStyle.Top,
     };
 
     private readonly StatusPill _brokerPill = new();
     private readonly StatusPill _mediaPill = new();
+
     private readonly Label _trackTitle = new()
     {
-        AutoSize = false, Height = 30, Dock = DockStyle.Top,
-        ForeColor = UiTheme.Text, Font = UiTheme.Display, Text = "Nothing playing",
+        AutoSize = true, ForeColor = UiTheme.Text, Font = UiTheme.Display,
+        Text = "Nothing playing", Margin = new Padding(0, 0, 0, 2), Dock = DockStyle.Top,
     };
     private readonly Label _trackArtist = new()
     {
-        AutoSize = false, Height = 22, Dock = DockStyle.Top,
-        ForeColor = UiTheme.TextSoft, Font = UiTheme.Body, Text = "—",
+        AutoSize = true, ForeColor = UiTheme.TextSoft, Font = UiTheme.Body, Text = "—",
+        Margin = new Padding(0, 0, 0, 10), Dock = DockStyle.Top,
     };
-    private readonly LevelBar _trackProgress = new() { Dock = DockStyle.Top, Height = 6 };
+    private readonly LevelBar _trackProgress = new();
     private readonly Label _trackTime = new()
     {
-        AutoSize = false, Height = 20, Dock = DockStyle.Top,
-        ForeColor = UiTheme.Muted, Font = UiTheme.Caption, Text = "",
+        AutoSize = true, ForeColor = UiTheme.Muted, Font = UiTheme.Small, Text = "",
+        Margin = new Padding(0), Dock = DockStyle.Top,
     };
 
     private readonly Label _volumeValue = new()
     {
-        AutoSize = false, Height = 34, Dock = DockStyle.Top,
-        ForeColor = UiTheme.Text, Font = UiTheme.Value, Text = "—",
+        AutoSize = true, ForeColor = UiTheme.Text, Font = UiTheme.Value, Text = "—",
+        Margin = new Padding(0), Dock = DockStyle.Top,
     };
-    private readonly LevelBar _volumeBar = new() { Dock = DockStyle.Top, Height = 10 };
-    private readonly TrackBar _volumeSlider = new()
-    {
-        Minimum = 0, Maximum = 100, TickStyle = TickStyle.None, Dock = DockStyle.Top,
-        BackColor = UiTheme.Backdrop,
-    };
+    private readonly SliderBar _volumeSlider = new();
+    private readonly Label _volumeHint = UiTheme.Caption("Drag to set the PC's master volume. The bot's knob moves this too.");
 
-    private readonly Panel _pageHost = new() { Dock = DockStyle.Fill, BackColor = UiTheme.Ink, AutoScroll = true };
+    private readonly Panel _pageHost = new()
+    {
+        Dock = DockStyle.Fill, BackColor = UiTheme.Ink, AutoScroll = true, Padding = new Padding(20, 18, 20, 18),
+    };
     private readonly List<Button> _navButtons = new();
     private readonly NotifyIcon _tray = new();
     private readonly MediaVolumeAgent _agent = new();
     private readonly System.Windows.Forms.Timer _refresh = new() { Interval = 700 };
     private bool _exiting;
-    private bool _suppressVolumeEvent;
+    private DateTime _lastVolumeSend = DateTime.MinValue;
 
     public MainForm()
     {
         Text = "Pico Assistant";
-        Width = 940;
-        Height = 700;
-        MinimumSize = new Size(880, 640);
+        ClientSize = new Size(960, 720);
+        MinimumSize = new Size(820, 620);
         BackColor = UiTheme.Ink;
         ForeColor = UiTheme.Text;
         Font = UiTheme.Body;
+        AutoScaleMode = AutoScaleMode.Font;
 
         var root = new TableLayoutPanel
         {
             Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 2, BackColor = UiTheme.Ink,
         };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -102,11 +107,12 @@ public sealed class MainForm : Form
         root.Controls.Add(BuildNav(), 0, 0);
         root.Controls.Add(_pageHost, 1, 0);
 
-        var footer = new FlowLayoutPanel
+        var footer = new Panel
         {
-            Dock = DockStyle.Fill, AutoSize = true, BackColor = UiTheme.Backdrop,
-            Padding = new Padding(16, 10, 16, 10),
+            Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = UiTheme.Backdrop, Padding = new Padding(20, 12, 20, 12),
         };
+        _status.Dock = DockStyle.Top;
         footer.Controls.Add(_status);
         root.Controls.Add(footer, 0, 1);
         root.SetColumnSpan(footer, 2);
@@ -119,35 +125,44 @@ public sealed class MainForm : Form
 
     private Control BuildNav()
     {
-        var nav = new FlowLayoutPanel
+        var nav = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false,
-            BackColor = UiTheme.Backdrop, Padding = new Padding(14, 18, 14, 14),
+            Dock = DockStyle.Fill, ColumnCount = 1, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = UiTheme.Backdrop,
+            Padding = new Padding(14, 20, 14, 14), GrowStyle = TableLayoutPanelGrowStyle.AddRows,
         };
+        nav.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        var brand = new Label
+        nav.Controls.Add(new Label
         {
-            Text = "PICO", AutoSize = true, ForeColor = UiTheme.Text,
-            Font = new Font("Segoe UI Semibold", 17F), Margin = new Padding(4, 0, 0, 0),
-        };
-        var brandSub = new Label
+            Text = "PICO", AutoSize = true, ForeColor = UiTheme.Text, Font = UiTheme.Brand,
+            Margin = new Padding(6, 0, 6, 0),
+        });
+        nav.Controls.Add(new Label
         {
-            Text = "ASSISTANT", AutoSize = true, ForeColor = UiTheme.Primary,
-            Font = new Font("Segoe UI", 8.5F), Margin = new Padding(5, 0, 0, 18),
-        };
-        nav.Controls.Add(brand);
-        nav.Controls.Add(brandSub);
+            Text = "ASSISTANT", AutoSize = true, ForeColor = UiTheme.Accent, Font = UiTheme.BrandSub,
+            Margin = new Padding(7, 0, 6, 20),
+        });
 
         var titles = new[] { "Dashboard", "Connection", "Monitoring", "Device" };
+        var width = titles.Max(title => TextRenderer.MeasureText(title, UiTheme.Body).Width) + 60;
         for (var index = 0; index < titles.Length; index++)
         {
             var page = index;
             var button = new Button
             {
-                Text = "   " + titles[index], Width = 158, Height = 38, FlatStyle = FlatStyle.Flat,
-                TextAlign = ContentAlignment.MiddleLeft, ForeColor = UiTheme.TextSoft,
-                BackColor = UiTheme.Backdrop, Font = UiTheme.Body, Cursor = Cursors.Hand,
+                Text = titles[index],
+                Width = width,
+                Height = TextRenderer.MeasureText(titles[index], UiTheme.Body).Height + 20,
+                FlatStyle = FlatStyle.Flat,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Padding = new Padding(14, 0, 0, 0),
+                ForeColor = UiTheme.TextSoft,
+                BackColor = UiTheme.Backdrop,
+                Font = UiTheme.Body,
+                Cursor = Cursors.Hand,
                 Margin = new Padding(0, 0, 0, 4),
+                UseVisualStyleBackColor = false,
             };
             button.FlatAppearance.BorderSize = 0;
             button.FlatAppearance.MouseOverBackColor = UiTheme.Card;
@@ -167,61 +182,95 @@ public sealed class MainForm : Form
             _navButtons[i].ForeColor = selected ? UiTheme.Text : UiTheme.TextSoft;
         }
 
+        _pageHost.SuspendLayout();
         _pageHost.Controls.Clear();
-        Control page = index switch
+        var page = index switch
         {
             0 => BuildDashboard(),
             1 => BuildConnection(),
             2 => BuildMonitoring(),
             _ => BuildDevice(),
         };
-        page.Dock = DockStyle.Top;
         _pageHost.Controls.Add(page);
+        _pageHost.ResumeLayout(true);
+        RefreshLiveState();
+    }
+
+    /// <summary>Single-column stack that grows with its cards.</summary>
+    private static TableLayoutPanel Page()
+    {
+        var page = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, ColumnCount = 1, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = UiTheme.Ink,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows,
+        };
+        page.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return page;
+    }
+
+    private static TableLayoutPanel Grid()
+    {
+        var grid = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top, ColumnCount = 2, AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = UiTheme.Backdrop,
+            GrowStyle = TableLayoutPanelGrowStyle.AddRows, Margin = new Padding(0),
+        };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        return grid;
+    }
+
+    private static FlowLayoutPanel Row()
+    {
+        return new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            BackColor = UiTheme.Backdrop, Margin = new Padding(0, 4, 0, 0), WrapContents = true,
+        };
     }
 
     private Control BuildDashboard()
     {
-        var stack = Stack();
+        var page = Page();
 
-        var live = new CardPanel("Live status", UiTheme.Primary) { Height = 96, Dock = DockStyle.Top };
-        var pills = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, BackColor = UiTheme.Backdrop };
-        _brokerPill.Width = 180;
-        _mediaPill.Width = 180;
+        var live = new CardPanel("Live status", UiTheme.Accent);
+        var pills = Row();
         pills.Controls.Add(_brokerPill);
         pills.Controls.Add(_mediaPill);
         live.Controls.Add(pills);
 
-        var media = new CardPanel("Now playing", UiTheme.Success) { Height = 168, Dock = DockStyle.Top };
-        // Added bottom-up: docked controls stack in reverse insertion order.
-        media.Controls.Add(_trackTime);
-        media.Controls.Add(_trackProgress);
-        media.Controls.Add(_trackArtist);
+        var media = new CardPanel("Now playing", UiTheme.Success);
         media.Controls.Add(_trackTitle);
+        media.Controls.Add(_trackArtist);
+        media.Controls.Add(_trackProgress);
+        media.Controls.Add(_trackTime);
 
-        var volume = new CardPanel("PC volume", UiTheme.Tertiary) { Height = 168, Dock = DockStyle.Top };
-        _volumeSlider.ValueChanged += OnVolumeSliderChanged;
-        volume.Controls.Add(_volumeSlider);
-        volume.Controls.Add(_volumeBar);
+        var volume = new CardPanel("PC volume", UiTheme.Highlight);
         volume.Controls.Add(_volumeValue);
+        volume.Controls.Add(_volumeSlider);
+        volume.Controls.Add(_volumeHint);
 
-        var actions = new CardPanel("Quick actions", UiTheme.Secondary) { Height = 108, Dock = DockStyle.Top };
-        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, BackColor = UiTheme.Backdrop };
-        row.Controls.Add(UiTheme.Primary1("Test broker", async (_, _) => await TestMqttAsync()));
-        row.Controls.Add(UiTheme.Ghost("Mute PC", async (_, _) => await SetVolumeAsync(0)));
-        row.Controls.Add(UiTheme.Ghost("Volume 50%", async (_, _) => await SetVolumeAsync(50)));
+        var actions = new CardPanel("Quick actions", UiTheme.AccentEnd);
+        var row = Row();
+        row.Controls.Add(UiTheme.PrimaryButton("Test broker", async (_, _) => await TestMqttAsync()));
+        row.Controls.Add(UiTheme.GhostButton("Mute", async (_, _) => await SetVolumeAsync(0)));
+        row.Controls.Add(UiTheme.GhostButton("Set 50%", async (_, _) => await SetVolumeAsync(50)));
         actions.Controls.Add(row);
 
-        stack.Controls.Add(actions);
-        stack.Controls.Add(volume);
-        stack.Controls.Add(media);
-        stack.Controls.Add(live);
-        return stack;
+        page.Controls.Add(live);
+        page.Controls.Add(media);
+        page.Controls.Add(volume);
+        page.Controls.Add(actions);
+        return page;
     }
 
     private Control BuildConnection()
     {
-        var stack = Stack();
-        var card = new CardPanel("Broker and identity", UiTheme.Primary) { Height = 280, Dock = DockStyle.Top };
+        var page = Page();
+
+        var card = new CardPanel("Broker and identity", UiTheme.Accent);
         var grid = Grid();
         AddRow(grid, "Device ID", _device);
         AddRow(grid, "Broker host", _host);
@@ -229,23 +278,25 @@ public sealed class MainForm : Form
         AddRow(grid, "Username", _username);
         AddRow(grid, "Password", _password);
         card.Controls.Add(grid);
+        card.Controls.Add(UiTheme.Caption(
+            "The device, this PC, the phone app and Home Assistant each need their own broker credential."));
 
-        var actions = new CardPanel("", UiTheme.Primary) { Height = 76, Dock = DockStyle.Top };
-        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, BackColor = UiTheme.Backdrop };
-        row.Controls.Add(UiTheme.Primary1("Save settings", async (_, _) => await SaveAsync()));
-        row.Controls.Add(UiTheme.Ghost("Test connection", async (_, _) => await TestMqttAsync()));
+        var actions = new CardPanel();
+        var row = Row();
+        row.Controls.Add(UiTheme.PrimaryButton("Save settings", async (_, _) => await SaveAsync()));
+        row.Controls.Add(UiTheme.GhostButton("Test connection", async (_, _) => await TestMqttAsync()));
         actions.Controls.Add(row);
 
-        stack.Controls.Add(actions);
-        stack.Controls.Add(card);
-        return stack;
+        page.Controls.Add(card);
+        page.Controls.Add(actions);
+        return page;
     }
 
     private Control BuildMonitoring()
     {
-        var stack = Stack();
+        var page = Page();
 
-        var sampling = new CardPanel("Sampling", UiTheme.Secondary) { Height = 200, Dock = DockStyle.Top };
+        var sampling = new CardPanel("Sampling", UiTheme.AccentEnd);
         var samplingGrid = Grid();
         AddRow(samplingGrid, "Telemetry interval (s)", _telemetryInterval);
         AddRow(samplingGrid, "Alert sustain (s)", _alertSustain);
@@ -253,7 +304,7 @@ public sealed class MainForm : Form
         AddRow(samplingGrid, "Speedtest CLI", _speedTest);
         sampling.Controls.Add(samplingGrid);
 
-        var limits = new CardPanel("Alert thresholds", UiTheme.Warning) { Height = 290, Dock = DockStyle.Top };
+        var limits = new CardPanel("Alert thresholds", UiTheme.Warning);
         var limitGrid = Grid();
         AddRow(limitGrid, "CPU limit (°C)", _cpuTemp);
         AddRow(limitGrid, "GPU limit (°C)", _gpuTemp);
@@ -262,57 +313,44 @@ public sealed class MainForm : Form
         AddRow(limitGrid, "Minimum drive free (%)", _driveFree);
         AddRow(limitGrid, "Recovery hysteresis", _hysteresis);
         limits.Controls.Add(limitGrid);
+        limits.Controls.Add(UiTheme.Caption(
+            "An alert fires once a limit is held for the sustain time, and clears once the value drops by the hysteresis."));
 
-        var actions = new CardPanel("", UiTheme.Secondary) { Height = 76, Dock = DockStyle.Top };
-        var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, BackColor = UiTheme.Backdrop };
-        row.Controls.Add(UiTheme.Primary1("Save settings", async (_, _) => await SaveAsync()));
+        var actions = new CardPanel();
+        var row = Row();
+        row.Controls.Add(UiTheme.PrimaryButton("Save settings", async (_, _) => await SaveAsync()));
         actions.Controls.Add(row);
 
-        stack.Controls.Add(actions);
-        stack.Controls.Add(limits);
-        stack.Controls.Add(sampling);
-        return stack;
+        page.Controls.Add(sampling);
+        page.Controls.Add(limits);
+        page.Controls.Add(actions);
+        return page;
     }
 
     private Control BuildDevice()
     {
-        var stack = Stack();
+        var page = Page();
 
-        var lan = new CardPanel("LAN diagnostics", UiTheme.Tertiary) { Height = 120, Dock = DockStyle.Top };
+        var lan = new CardPanel("LAN diagnostics", UiTheme.Highlight);
         lan.Controls.Add(_network);
+        lan.Controls.Add(UiTheme.Caption("Use these values for the device's MAC and broadcast fields during setup."));
 
-        var danger = new CardPanel("Reset the device", UiTheme.Danger) { Height = 148, Dock = DockStyle.Top };
-        var explain = new Label
+        var danger = new CardPanel("Reset the device", UiTheme.Danger);
+        danger.Controls.Add(new Label
         {
-            Dock = DockStyle.Top, Height = 40, ForeColor = UiTheme.TextSoft, Font = UiTheme.Body,
-            Text = "Wi-Fi reset clears only the network and reopens setup.\n" +
+            AutoSize = true, Dock = DockStyle.Top, ForeColor = UiTheme.TextSoft, Font = UiTheme.Body,
+            Margin = new Padding(0, 0, 0, 10),
+            Text = "Wi-Fi reset clears only the network and reopens setup.\r\n" +
                    "Factory reset erases every stored credential and pairing.",
-        };
-        var row = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, BackColor = UiTheme.Backdrop };
-        row.Controls.Add(UiTheme.Ghost("Wi-Fi reset", async (_, _) => await ResetAsync("wifi")));
-        row.Controls.Add(UiTheme.Destructive("Factory reset", async (_, _) => await ConfirmFactoryResetAsync()));
+        });
+        var row = Row();
+        row.Controls.Add(UiTheme.GhostButton("Wi-Fi reset", async (_, _) => await ResetAsync("wifi")));
+        row.Controls.Add(UiTheme.DestructiveButton("Factory reset", async (_, _) => await ConfirmFactoryResetAsync()));
         danger.Controls.Add(row);
-        danger.Controls.Add(explain);
 
-        stack.Controls.Add(danger);
-        stack.Controls.Add(lan);
-        return stack;
-    }
-
-    private static Panel Stack() => new()
-    {
-        Dock = DockStyle.Top, AutoSize = true, BackColor = UiTheme.Ink, Padding = new Padding(18, 18, 18, 6),
-    };
-
-    private static TableLayoutPanel Grid()
-    {
-        var grid = new TableLayoutPanel
-        {
-            Dock = DockStyle.Fill, ColumnCount = 2, AutoSize = true, BackColor = UiTheme.Backdrop,
-        };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        return grid;
+        page.Controls.Add(lan);
+        page.Controls.Add(danger);
+        return page;
     }
 
     private void StartBackgroundAgent()
@@ -327,6 +365,8 @@ public sealed class MainForm : Form
         menu.Items.Add("Quit", null, (_, _) => { _exiting = true; Close(); });
         _tray.ContextMenuStrip = menu;
 
+        _volumeSlider.ValueChanging += OnVolumeDragging;
+        _volumeSlider.ValueCommitted += OnVolumeCommitted;
         _refresh.Tick += (_, _) => RefreshLiveState();
         _agent.Start();
         _refresh.Start();
@@ -347,7 +387,7 @@ public sealed class MainForm : Form
             _trackTitle.Text = media.Title;
             _trackArtist.Text = string.IsNullOrWhiteSpace(media.Artist)
                 ? media.App
-                : $"{media.Artist}   ·   {media.App}";
+                : $"{media.Artist}     {media.App}";
             if (media.PositionSeconds is { } position && media.DurationSeconds is { } duration && duration > 0)
             {
                 _trackProgress.Value = (int)Math.Clamp(position / duration * 100, 0, 100);
@@ -368,11 +408,8 @@ public sealed class MainForm : Form
         }
 
         _volumeValue.Text = _agent.Muted ? "Muted" : $"{_agent.Volume}%";
-        _volumeBar.Value = _agent.Muted ? 0 : _agent.Volume;
-        if (_volumeSlider.Focused) return;
-        _suppressVolumeEvent = true;
-        _volumeSlider.Value = Math.Clamp(_agent.Volume, 0, 100);
-        _suppressVolumeEvent = false;
+        // Never fight the user's hand: skip the sync while the knob is held.
+        if (!_volumeSlider.Dragging) _volumeSlider.Value = Math.Clamp(_agent.Volume, 0, 100);
     }
 
     private static string Format(double seconds)
@@ -381,18 +418,23 @@ public sealed class MainForm : Form
         return $"{(int)span.TotalMinutes}:{span.Seconds:00}";
     }
 
-    private async void OnVolumeSliderChanged(object? sender, EventArgs args)
+    private async void OnVolumeDragging(int level)
     {
-        if (_suppressVolumeEvent) return;
-        await SetVolumeAsync(_volumeSlider.Value);
+        _volumeValue.Text = $"{level}%";
+        // Throttle while dragging so a sweep does not fire a hundred writes.
+        if ((DateTime.UtcNow - _lastVolumeSend).TotalMilliseconds < 120) return;
+        _lastVolumeSend = DateTime.UtcNow;
+        await SetVolumeAsync(level, quiet: true);
     }
 
-    private async Task SetVolumeAsync(int level)
+    private async void OnVolumeCommitted(int level) => await SetVolumeAsync(level);
+
+    private async Task SetVolumeAsync(int level, bool quiet = false)
     {
         try
         {
             await _agent.SetVolumeAsync(level);
-            _status.Text = $"Volume set to {level}%.";
+            if (!quiet) _status.Text = $"Volume set to {level}%.";
         }
         catch (Exception ex)
         {
@@ -467,7 +509,18 @@ public sealed class MainForm : Form
 
     private Task SaveAsync()
     {
-        OptionsStore.Save(ReadOptions());
+        var options = ReadOptions();
+        if (string.IsNullOrWhiteSpace(options.DeviceId))
+        {
+            _status.Text = "Device ID is required.";
+            return Task.CompletedTask;
+        }
+        if (string.IsNullOrWhiteSpace(options.Mqtt.Host))
+        {
+            _status.Text = "Broker host is required.";
+            return Task.CompletedTask;
+        }
+        OptionsStore.Save(options);
         _status.Text = "Saved. Restart the Pico Assistant service to apply changes.";
         return Task.CompletedTask;
     }
@@ -533,11 +586,7 @@ public sealed class MainForm : Form
 
     private static void AddRow(TableLayoutPanel layout, string label, Control control)
     {
-        layout.Controls.Add(new Label
-        {
-            Text = label, AutoSize = true, Anchor = AnchorStyles.Left,
-            ForeColor = UiTheme.TextSoft, Font = UiTheme.Body, Margin = new Padding(0, 8, 0, 0),
-        }, 0, layout.RowCount);
+        layout.Controls.Add(UiTheme.FieldLabel(label), 0, layout.RowCount);
         layout.Controls.Add(control, 1, layout.RowCount);
         layout.RowCount++;
     }
@@ -559,7 +608,7 @@ public sealed class MainForm : Form
                 broadcast[index] = (byte)(ip[index] | ~mask[index]);
             var mac = string.Join(":", adapter.GetPhysicalAddress().GetAddressBytes()
                 .Select(value => value.ToString("X2")));
-            return $"{adapter.Name}\nMAC {mac}\nIP {address.Address}\nBroadcast {new IPAddress(broadcast)}";
+            return $"Adapter\t{adapter.Name}\r\nMAC\t{mac}\r\nIP\t{address.Address}\r\nBroadcast\t{new IPAddress(broadcast)}";
         }
         return "No active IPv4 LAN adapter detected.";
     }

@@ -714,7 +714,6 @@ void BotDisplay::drawVolumeOverlay(uint32_t now) {
               shade(theme::kPrimary), accent, background);
 
   card_.pushSprite(kMargin, kVolumeOverlayY);
-  volumeOverlayDrawn_ = true;
 }
 
 void BotDisplay::drawMetricCard(uint8_t index, int16_t y, const char *label,
@@ -796,11 +795,18 @@ void BotDisplay::drawMetricCard(uint8_t index, int16_t y, const char *label,
   card_.pushSprite(kMargin, y);
 }
 
-void BotDisplay::drawMetricCards(uint32_t now) {
+void BotDisplay::drawMetricCards(uint32_t now, bool volumeOverlay) {
   drawMetricCard(0, kCardFirstY, "CPU TEMPERATURE", cpu_, "\xb0\x43",
                  theme::kPrimary, true, now);
-  drawMetricCard(1, kCardFirstY + kCardSpacing, "GPU TEMPERATURE", gpu_,
-                 "\xb0\x43", theme::kSecondary, true, now);
+  // The overlay occupies this slot rather than being drawn on top of it.
+  // Pushing both to the same region in one pass is what made the screen flicker
+  // while the knob was moving.
+  if (volumeOverlay) {
+    drawVolumeOverlay(now);
+  } else {
+    drawMetricCard(1, kCardFirstY + kCardSpacing, "GPU TEMPERATURE", gpu_,
+                   "\xb0\x43", theme::kSecondary, true, now);
+  }
   drawMetricCard(2, kCardFirstY + kCardSpacing * 2, "MEMORY IN USE", memory_,
                  "%", theme::kTertiary, false, now, true);
 }
@@ -1003,12 +1009,8 @@ void BotDisplay::tick(uint32_t now) {
     } else {
       drawNetwork(now);
     }
-    drawMetricCards(now);
-    // Cards were just repainted, so any overlay on top of them is gone.
-    volumeOverlayDrawn_ = false;
+    drawMetricCards(now, volumeOverlay);
   }
-
-  if (volumeOverlay) drawVolumeOverlay(now);
 
   if (touchPressed_ || frame_ % 4 == 0)
     drawFooter(now);

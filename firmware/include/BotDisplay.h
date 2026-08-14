@@ -75,7 +75,7 @@ class BotDisplay {
   void drawMetricCard(uint8_t index, int16_t y, const char* label,
                       const Metric& metric, const char* unit, uint16_t calm,
                       bool temperature, uint32_t now, bool unitPrefix = false);
-  void drawMetricCards(uint32_t now);
+  void drawMetricCards(uint32_t now, bool volumeOverlay);
   void drawProvisioning();
   void drawFooter(uint32_t now);
   void finishIntro();
@@ -125,7 +125,6 @@ class BotDisplay {
   bool volumeMuted_ = false;
   bool volumeKnown_ = false;
   uint32_t volumeOverlayUntil_ = 0;
-  bool volumeOverlayDrawn_ = false;
 
   int16_t rssiDbm_ = 0;
   // Decaying peak throughput, so the trend stays meaningful on any connection

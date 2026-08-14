@@ -3,9 +3,12 @@ using System.Drawing.Drawing2D;
 namespace PcBot.Tray;
 
 /// <summary>
-/// Dark theme shared by every control in the desktop app, matching the palette
-/// the device itself runs: deep navy ground, frosted card surfaces, and a
-/// violet-to-blue accent kept separate from the status colours.
+/// Dark theme shared by every control, matching the palette the device runs:
+/// deep navy ground, frosted card surfaces, and a violet-to-blue accent kept
+/// separate from the status colours.
+///
+/// Nothing here uses fixed pixel heights for text: sizes come from the fonts so
+/// the window lays out correctly at 100%, 125% and 150% display scaling.
 /// </summary>
 public static class UiTheme
 {
@@ -18,20 +21,21 @@ public static class UiTheme
     public static readonly Color TextSoft = Color.FromArgb(166, 180, 216);
     public static readonly Color Muted = Color.FromArgb(112, 126, 162);
 
-    public static readonly Color Primary = Color.FromArgb(139, 92, 246);
-    public static readonly Color Secondary = Color.FromArgb(59, 130, 246);
-    public static readonly Color Tertiary = Color.FromArgb(34, 211, 238);
+    public static readonly Color Accent = Color.FromArgb(139, 92, 246);
+    public static readonly Color AccentEnd = Color.FromArgb(59, 130, 246);
+    public static readonly Color Highlight = Color.FromArgb(34, 211, 238);
     public static readonly Color Success = Color.FromArgb(34, 197, 94);
     public static readonly Color Warning = Color.FromArgb(245, 158, 11);
     public static readonly Color Danger = Color.FromArgb(244, 63, 94);
 
-    public static readonly Font Display = new("Segoe UI Semibold", 15F);
-    public static readonly Font Heading = new("Segoe UI Semibold", 10.5F);
+    public static readonly Font Brand = new("Segoe UI Semibold", 16F);
+    public static readonly Font BrandSub = new("Segoe UI", 8F);
+    public static readonly Font Display = new("Segoe UI Semibold", 14F);
+    public static readonly Font Heading = new("Segoe UI Semibold", 9.5F);
     public static readonly Font Body = new("Segoe UI", 9.75F);
-    public static readonly Font Value = new("Segoe UI Semibold", 20F);
-    public static readonly Font Caption = new("Segoe UI", 8.25F);
+    public static readonly Font Value = new("Segoe UI Semibold", 19F);
+    public static readonly Font Small = new("Segoe UI", 8.25F);
 
-    /// <summary>Rounded rectangle path, used by every card and pill.</summary>
     public static GraphicsPath RoundedRect(Rectangle bounds, int radius)
     {
         var path = new GraphicsPath();
@@ -42,21 +46,11 @@ public static class UiTheme
             return path;
         }
         path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
-        path.AddArc(bounds.Right - diameter - 1, bounds.Y, diameter, diameter, 270, 90);
-        path.AddArc(bounds.Right - diameter - 1, bounds.Bottom - diameter - 1, diameter, diameter, 0, 90);
-        path.AddArc(bounds.X, bounds.Bottom - diameter - 1, diameter, diameter, 90, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         return path;
-    }
-
-    public static void FillCard(Graphics graphics, Rectangle bounds, Color? accent = null)
-    {
-        graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        using var path = RoundedRect(bounds, 10);
-        using var body = new LinearGradientBrush(bounds, Card, Backdrop, 90F);
-        graphics.FillPath(body, path);
-        using var pen = new Pen(accent is null ? Border : Blend(Border, accent.Value, 0.55f));
-        graphics.DrawPath(pen, path);
     }
 
     public static Color Blend(Color a, Color b, float amount)
@@ -68,21 +62,36 @@ public static class UiTheme
             (int)(a.B + (b.B - a.B) * amount));
     }
 
-    /// <summary>Text input styled as a recessed well.</summary>
-    public static TextBox Field(bool password = false)
+    /// <summary>Label that sits on a card, vertically centred against its row.</summary>
+    public static Label FieldLabel(string text) => new()
     {
-        var box = new TextBox
-        {
-            Dock = DockStyle.Fill,
-            BorderStyle = BorderStyle.FixedSingle,
-            BackColor = Ink,
-            ForeColor = Text,
-            Font = Body,
-            UseSystemPasswordChar = password,
-            Margin = new Padding(0, 3, 0, 3),
-        };
-        return box;
-    }
+        Text = text,
+        AutoSize = true,
+        ForeColor = TextSoft,
+        Font = Body,
+        Anchor = AnchorStyles.Left,
+        Margin = new Padding(0, 9, 12, 9),
+    };
+
+    public static Label Caption(string text) => new()
+    {
+        Text = text,
+        AutoSize = true,
+        ForeColor = Muted,
+        Font = Small,
+        Margin = new Padding(0, 2, 0, 0),
+    };
+
+    public static TextBox Field(bool password = false) => new()
+    {
+        Dock = DockStyle.Fill,
+        BorderStyle = BorderStyle.FixedSingle,
+        BackColor = Ink,
+        ForeColor = Text,
+        Font = Body,
+        UseSystemPasswordChar = password,
+        Margin = new Padding(0, 5, 0, 5),
+    };
 
     public static NumericUpDown Number(decimal minimum, decimal maximum, decimal value) => new()
     {
@@ -95,61 +104,61 @@ public static class UiTheme
         BackColor = Ink,
         ForeColor = Text,
         Font = Body,
-        Margin = new Padding(0, 3, 0, 3),
+        Margin = new Padding(0, 5, 0, 5),
     };
 
-    public static Label Caption2(string text) => new()
-    {
-        Text = text,
-        AutoSize = true,
-        ForeColor = Muted,
-        Font = Caption,
-        Margin = new Padding(0, 6, 0, 0),
-    };
+    public static Button PrimaryButton(string text, EventHandler onClick) =>
+        StyledButton(text, onClick, Accent, AccentEnd, Text);
 
-    /// <summary>Filled gradient button for the primary action of a page.</summary>
-    public static Button Primary1(string text, EventHandler onClick) =>
-        StyledButton(text, onClick, Primary, Secondary, Text);
-
-    /// <summary>Quiet button for secondary actions.</summary>
-    public static Button Ghost(string text, EventHandler onClick) =>
+    public static Button GhostButton(string text, EventHandler onClick) =>
         StyledButton(text, onClick, Card, CardHover, TextSoft);
 
-    /// <summary>Button for destructive actions, coloured by status not accent.</summary>
-    public static Button Destructive(string text, EventHandler onClick) =>
-        StyledButton(text, onClick, Color.FromArgb(72, 24, 40), Color.FromArgb(104, 32, 52), Color.FromArgb(255, 176, 190));
+    public static Button DestructiveButton(string text, EventHandler onClick) =>
+        StyledButton(text, onClick, Color.FromArgb(74, 26, 42), Color.FromArgb(108, 34, 56),
+            Color.FromArgb(255, 176, 190));
 
-    private static Button StyledButton(string text, EventHandler onClick, Color from, Color to, Color foreground)
+    private static Button StyledButton(string text, EventHandler onClick, Color from, Color to,
+        Color foreground)
     {
         var button = new Button
         {
             Text = text,
             AutoSize = false,
-            Height = 34,
-            Width = 132,
             FlatStyle = FlatStyle.Flat,
             ForeColor = foreground,
+            // Matching the surface behind it keeps the rounded corners from
+            // showing a square patch of the default control colour.
+            BackColor = Card,
             Font = Body,
-            Margin = new Padding(0, 0, 8, 0),
+            Margin = new Padding(0, 0, 10, 0),
             Cursor = Cursors.Hand,
+            UseVisualStyleBackColor = false,
         };
         button.FlatAppearance.BorderSize = 0;
+        button.FlatAppearance.MouseOverBackColor = button.BackColor;
+        button.FlatAppearance.MouseDownBackColor = button.BackColor;
+
+        // Size from the text so long labels are never clipped at any DPI.
+        var measured = TextRenderer.MeasureText(text, Body);
+        button.Size = new Size(measured.Width + 34, measured.Height + 18);
+
+        var hovered = false;
         button.Paint += (sender, args) =>
         {
             if (sender is not Button target) return;
             var bounds = new Rectangle(0, 0, target.Width, target.Height);
+            args.Graphics.Clear(target.BackColor);
             args.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var path = RoundedRect(bounds, 8);
-            var hovered = target.ClientRectangle.Contains(target.PointToClient(Cursor.Position));
+            using var path = RoundedRect(new Rectangle(0, 0, bounds.Width - 1, bounds.Height - 1), 8);
             using var brush = new LinearGradientBrush(bounds,
-                hovered ? Blend(from, Color.White, 0.10f) : from,
-                hovered ? Blend(to, Color.White, 0.10f) : to, 0F);
+                hovered ? Blend(from, Color.White, 0.12f) : from,
+                hovered ? Blend(to, Color.White, 0.12f) : to, 0F);
             args.Graphics.FillPath(brush, path);
             TextRenderer.DrawText(args.Graphics, target.Text, target.Font, bounds,
                 target.ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         };
-        button.MouseEnter += (sender, _) => ((Control)sender!).Invalidate();
-        button.MouseLeave += (sender, _) => ((Control)sender!).Invalidate();
+        button.MouseEnter += (sender, _) => { hovered = true; ((Control)sender!).Invalidate(); };
+        button.MouseLeave += (sender, _) => { hovered = false; ((Control)sender!).Invalidate(); };
         button.Click += onClick;
         return button;
     }

@@ -1,9 +1,34 @@
-# Windows agent and control panel
+# Windows agent and desktop app
 
-The .NET 8 Windows service publishes hardware telemetry and handles graceful
-shutdown and speed-test commands. The tray control panel stores MQTT settings,
-alert thresholds, timing, and shows the active adapter's MAC and broadcast
-address for ESP32 provisioning.
+Two processes with different jobs:
+
+| Process | Session | Responsibility |
+|---|---|---|
+| `PcBot.Service` | Session 0 (Windows service) | Hardware telemetry, alerts, graceful shutdown, speed tests |
+| `PcBot.Tray` | Interactive user session | Desktop app: settings, live dashboard, now-playing, PC volume |
+
+The split is not cosmetic. The Windows media session and the audio endpoint both
+belong to the logged-in user, so a session 0 service cannot read what is playing
+or change the volume. Those duties live in the desktop app.
+
+## The desktop app
+
+A dark, four-page window matching the device's own palette:
+
+| Page | Contents |
+|---|---|
+| Dashboard | Broker and media status pills, now-playing card with progress, PC volume with a live slider, quick actions |
+| Connection | Device ID, broker host/port, credentials, save and test |
+| Monitoring | Sampling intervals and alert thresholds |
+| Device | LAN diagnostics, Wi-Fi reset, factory reset |
+
+Closing the window hides it to the notification area — the media and volume
+agent keeps running, because that is the whole point of it. Quit from the tray
+icon's menu to stop it. Double-click the icon to reopen.
+
+The agent publishes retained `state/media` and `state/volume`, and subscribes to
+`command/volume` so the bot's knob drives the PC. The dashboard slider and the
+knob are two views of the same value.
 
 ## Build
 
@@ -12,10 +37,26 @@ dotnet build .\PcBot.sln -c Release
 dotnet run --project .\tests\PcBot.Tests\PcBot.Tests.csproj -c Release
 ```
 
-Install the Ookla Speedtest CLI and set its executable path in the control
-panel. Run `install-service.ps1` from an elevated PowerShell terminal to publish
-and install self-contained service/tray executables. Open `PcBot.Tray.exe`,
-save a dedicated TLS MQTT credential, then restart the service.
+## Publish
+
+```powershell
+.\publish.ps1
+```
+
+> The service locks its own DLLs while running, so `publish.ps1` fails with
+> `MSB3027 ... locked by PC Assistant Bot` if the service is up. Stop it first
+> from an elevated terminal (`Stop-Service PcBot`), publish, then start it
+> again. Publishing only the desktop app never needs this:
+>
+> ```powershell
+> dotnet publish .\src\PcBot.Tray\PcBot.Tray.csproj -c Release -r win-x64 --self-contained true -o .\publish\tray
+> ```
+
+Install the Ookla Speedtest CLI and set its executable path on the Monitoring
+page. Run `install-service.ps1` from an elevated PowerShell terminal to publish
+and install self-contained service and desktop executables. Open
+`PcBot.Tray.exe`, save a dedicated TLS MQTT credential, then restart the
+service.
 
 The service performs graceful Windows shutdown only. The ESP32 handles wake by
 sending a Wake-on-LAN packet on the local network.
