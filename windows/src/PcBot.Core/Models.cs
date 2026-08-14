@@ -43,6 +43,35 @@ public sealed record Acknowledgement(
     string Message,
     DateTimeOffset Timestamp);
 
+/// <summary>
+/// Whatever the PC is currently playing, read from the Windows media session.
+/// Status is "playing", "paused" or "stopped".
+/// </summary>
+public sealed record MediaState(
+    string Status,
+    string Title,
+    string Artist,
+    string Album,
+    string App,
+    double? PositionSeconds,
+    double? DurationSeconds,
+    DateTimeOffset Timestamp);
+
+public sealed record VolumeState(
+    int Level,
+    bool Muted,
+    DateTimeOffset Timestamp);
+
+/// <summary>
+/// Volume setpoint from the bot's knob. Deliberately not a CommandEnvelope: it
+/// is a continuously updated absolute value, so a late one is worthless rather
+/// than worth retrying.
+/// </summary>
+public sealed record VolumeSetpoint(
+    int Level,
+    string Source,
+    DateTimeOffset Timestamp);
+
 public sealed record SpeedTestState(
     string Status,
     double? DownloadMbps,
@@ -88,8 +117,11 @@ public sealed class MqttTopics
     public string PowerCommand => $"{_root}/command/power";
     public string SpeedTestCommand => $"{_root}/command/speedtest";
     public string ResetCommand => $"{_root}/command/reset";
+    public string VolumeCommand => $"{_root}/command/volume";
     public string PcState => $"{_root}/state/pc";
     public string SpeedTestState => $"{_root}/state/speedtest";
+    public string MediaState => $"{_root}/state/media";
+    public string VolumeState => $"{_root}/state/volume";
     public string Telemetry => $"{_root}/telemetry/system";
     public string Alert => $"{_root}/event/alert";
     public string Ack => $"{_root}/event/ack";

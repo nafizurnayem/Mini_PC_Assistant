@@ -32,6 +32,7 @@ to the displayed hotspot, and open `http://192.168.4.1`. Enter:
 - destination Wi-Fi SSID/password;
 - the same device ID used by all other components;
 - PC wired-Ethernet MAC and LAN broadcast address;
+- the local time zone, used by the power-saver clock screen;
 - ESP32-specific MQTT username/password, TLS port, and root CA.
 
 Holding TTP223 for five seconds during boot clears Wi-Fi only. MQTT secrets are

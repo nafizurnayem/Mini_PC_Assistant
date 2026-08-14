@@ -22,11 +22,29 @@ WiFiUDP udp;
 
 String rootTopic;
 bool pcOnline = false;
-bool touchWasDown = false;
-bool touchHeld = false;
-uint32_t touchStarted = 0;
+
+// Debounced TTP223 state. raw/stable are separated so contact bounce and
+// electrical noise can never be mistaken for a tap.
+struct TouchState {
+  bool raw = false;
+  bool stable = false;
+  bool holdFired = false;
+  uint32_t lastEdge = 0;
+  uint32_t pressedAt = 0;
+};
+TouchState touch;
+
 uint32_t lastMqttAttempt = 0;
+uint32_t lastWifiAttempt = 0;
 uint32_t lastTelemetry = 0;
+uint32_t lastRssiSample = 0;
+
+// Volume knob state. The smoothed reading is kept in ADC counts so the
+// percentage only ever changes when the knob really moved.
+float potFiltered = NAN;
+int16_t lastSentVolume = -1;
+uint32_t lastVolumeSample = 0;
+uint32_t lastVolumePublish = 0;
 String recentCommands[10];
 uint8_t recentIndex = 0;
 
@@ -37,6 +55,16 @@ struct PendingCommand {
   String action;
 };
 PendingCommand pending;
+
+// Potentiometer state — tracks the smoothed ADC reading and the last
+// volume level that was sent to the broker so we can apply a deadband.
+struct PotState {
+  float smoothed = -1.0f;   // EMA of raw ADC; -1 = not yet seeded
+  int lastPublished = -1;   // volume % last sent; -1 = never
+  uint32_t lastSampleMs = 0;
+  uint32_t lastPublishMs = 0;
+};
+PotState pot;
 
 String topic(const char* suffix) { return rootTopic + "/" + suffix; }
 
@@ -87,7 +115,8 @@ bool duplicateCommand(const String& commandId) {
   for (const auto& seen : recentCommands) {
     if (seen == commandId) return true;
   }
-  recentCommands[recentIndex++ % 10] = commandId;
+  recentCommands[recentIndex] = commandId;
+  recentIndex = (recentIndex + 1) % 10;
   return false;
 }
 
@@ -155,6 +184,16 @@ void beep(uint16_t frequency, uint16_t duration) {
   tone(BoardConfig::kBuzzerPin, frequency, duration);
 }
 
+// While the PC is off there is no telemetry to render and no commands to run,
+// so the controller drops to the lowest frequency Wi-Fi still supports.
+void applyPowerProfile(bool pcIsOn) {
+  const uint32_t target =
+      pcIsOn ? BoardConfig::kActiveCpuMhz : BoardConfig::kPowerSaverCpuMhz;
+  if (getCpuFrequencyMhz() == target) return;
+  setCpuFrequencyMhz(target);
+  Serial.printf("[pico] cpu %u MHz (pc %s)\n", target, pcIsOn ? "on" : "off");
+}
+
 void onMessage(String& incomingTopic, String& payload) {
   JsonDocument doc;
   if (deserializeJson(doc, payload)) return;
@@ -162,6 +201,7 @@ void onMessage(String& incomingTopic, String& payload) {
   if (incomingTopic == topic("state/pc")) {
     pcOnline = String(doc["status"] | "offline") == "online";
     if (pcOnline) bot.setMood(BotMood::Happy);
+    bot.setPcOnline(pcOnline);
     return;
   }
 
@@ -170,6 +210,25 @@ void onMessage(String& incomingTopic, String& payload) {
     bot.setMetrics(doc["cpu"]["temperatureC"] | NAN,
                    doc["gpu"]["temperatureC"] | NAN,
                    doc["memory"]["usedPercent"] | NAN);
+    bot.setNetwork(doc["network"]["downloadMbps"] | NAN,
+                   doc["network"]["uploadMbps"] | NAN,
+                   WiFi.status() == WL_CONNECTED
+                       ? static_cast<int16_t>(WiFi.RSSI())
+                       : 0);
+    return;
+  }
+
+  if (incomingTopic == topic("state/media")) {
+    bot.setMedia(doc["status"] | "stopped", doc["title"] | "",
+                 doc["artist"] | "", doc["app"] | "",
+                 doc["positionSeconds"] | NAN, doc["durationSeconds"] | NAN);
+    return;
+  }
+
+  if (incomingTopic == topic("state/volume")) {
+    const int level = doc["level"] | 0;
+    bot.setVolume(static_cast<uint8_t>(constrain(level, 0, 100)),
+                  doc["muted"] | false);
     return;
   }
 
@@ -241,6 +300,11 @@ void connectMqtt(uint32_t now) {
     return;
   }
   lastMqttAttempt = now;
+  // The TLS handshake blocks for up to a few seconds, so tell the operator what
+  // is happening before the loop stalls. The client id keeps its original
+  // prefix because broker ACLs are usually written against it.
+  bot.setMood(BotMood::Connecting, "Reaching the broker");
+  bot.tick(now);
   String clientId = "pcbot-esp32-" + config.deviceId;
   String willTopic = topic("state/bot");
   String willPayload = "{\"status\":\"offline\",\"source\":\"esp32\"}";
@@ -254,55 +318,177 @@ void connectMqtt(uint32_t now) {
   mqtt.subscribe(topic("command/speedtest"), 1);
   mqtt.subscribe(topic("command/reset"), 1);
   mqtt.subscribe(topic("state/pc"), 1);
+  mqtt.subscribe(topic("state/media"), 1);
+  mqtt.subscribe(topic("state/volume"), 1);
   mqtt.subscribe(topic("telemetry/system"), 1);
   mqtt.subscribe(topic("event/alert"), 1);
   mqtt.publish(topic("state/bot"), "{\"status\":\"online\",\"source\":\"esp32\"}", true, 1);
   bot.setMood(BotMood::Happy);
 }
 
+// Reads the knob, smooths it, and publishes a setpoint only when the operator
+// actually moved it. Volume is an absolute, continuously-updated value, so it
+// goes out at QoS 0 without retention: a stale setpoint is worthless.
+void handleVolumeKnob(uint32_t now) {
+  if (now - lastVolumeSample < BoardConfig::kVolumeSampleMs) return;
+  lastVolumeSample = now;
+
+  const float raw = static_cast<float>(analogRead(BoardConfig::kPotPin));
+  potFiltered = isnan(potFiltered) ? raw : potFiltered + (raw - potFiltered) * 0.25f;
+  if (now < BoardConfig::kVolumeSettleMs) return;
+
+  int level = static_cast<int>(potFiltered * 100.0f / BoardConfig::kPotAdcMax + 0.5f);
+  level = constrain(level, 0, 100);
+
+  const bool endStop = (level == 0 || level == 100) && level != lastSentVolume;
+  const bool moved = lastSentVolume < 0 ||
+                     abs(level - lastSentVolume) >= BoardConfig::kVolumeStepPercent;
+  if (!moved && !endStop) return;
+  if (now - lastVolumePublish < BoardConfig::kVolumePublishMs) return;
+  if (!mqtt.connected()) return;
+
+  lastSentVolume = level;
+  lastVolumePublish = now;
+
+  JsonDocument doc;
+  doc["level"] = level;
+  doc["source"] = "bot";
+  doc["timestamp"] = isoNow();
+  String payload;
+  serializeJson(doc, payload);
+  mqtt.publish(topic("command/volume"), payload, false, 0);
+  // Show it immediately rather than waiting for the PC to echo the change back.
+  bot.setVolume(static_cast<uint8_t>(level), level == 0);
+}
+
+bool touchIsActive() {
+  const int level = digitalRead(BoardConfig::kTouchPin);
+  return BoardConfig::kTouchActiveHigh ? level == HIGH : level == LOW;
+}
+
+void onTouchHold() {
+  // Power control needs a broker session, so during setup the hold only
+  // explains itself instead of silently doing nothing.
+  if (provisioner.active()) {
+    beep(900, 120);
+    return;
+  }
+  if (!mqtt.connected()) {
+    bot.setMood(BotMood::Disconnected, "No link for power control");
+    beep(900, 120);
+    return;
+  }
+  publishPowerCommand(pcOnline ? "off" : "on", "bot");
+  bot.setMood(pcOnline ? BotMood::ShuttingDown : BotMood::Waking);
+  beep(1800, 250);
+  Serial.printf("[pico] hold: power %s\n", pcOnline ? "off" : "on");
+}
+
+void onTouchTap() {
+  bot.setMood(BotMood::Petted);
+  beep(2200, 70);
+  Serial.println("[pico] tap");
+}
+
+// Reads the potentiometer and publishes a VolumeSetpoint whenever the knob
+// moves by >= 2 steps. Uses EMA smoothing to suppress ADC noise, and a
+// minimum 80 ms inter-publish gap to avoid flooding the broker.
+void handlePotentiometer(uint32_t now) {
+  if (now - pot.lastSampleMs < 50) return;  // 20 Hz sampling
+  pot.lastSampleMs = now;
+
+  const int raw = analogRead(BoardConfig::kPotPin);
+  // Seed the EMA on first read so the display doesn't animate from zero.
+  if (pot.smoothed < 0.0f) pot.smoothed = static_cast<float>(raw);
+  pot.smoothed = pot.smoothed * 0.85f + static_cast<float>(raw) * 0.15f;
+
+  // Map 12-bit ADC (0-4095) to volume 0-100.
+  const int level = static_cast<int>(pot.smoothed * 100.0f / 4095.0f + 0.5f);
+
+  // Deadband: ignore tiny jitter; only publish when knob moves noticeably.
+  if (abs(level - pot.lastPublished) < 2) return;
+  if (!mqtt.connected()) return;
+  if (now - pot.lastPublishMs < 80) return;   // rate limit: max ~12 msg/s
+
+  pot.lastPublished = level;
+  pot.lastPublishMs = now;
+
+  JsonDocument doc;
+  doc["level"]     = level;
+  doc["source"]    = "esp32";
+  doc["timestamp"] = isoNow();
+  publishJson(topic("command/volume"), doc, false);
+  Serial.printf("[pico] volume knob -> %d%%\n", level);
+}
+
 void handleTouch(uint32_t now) {
-  bool down = digitalRead(BoardConfig::kTouchPin) == HIGH;
-  if (down && !touchWasDown) {
-    touchStarted = now;
-    touchHeld = false;
-    bot.noteActivity(now);
+  const bool raw = touchIsActive();
+  if (raw != touch.raw) {
+    touch.raw = raw;
+    touch.lastEdge = now;
+    // Logged before debouncing: this separates "the sensor never fires" from
+    // "the sensor fires but the gesture was too short".
+    Serial.printf("[pico] touch raw=%d\n", raw ? 1 : 0);
   }
-  if (down && !touchHeld && now - touchStarted >= BoardConfig::kTouchHoldMs) {
-    touchHeld = true;
-    publishPowerCommand(pcOnline ? "off" : "on", "bot");
-    bot.setMood(pcOnline ? BotMood::ShuttingDown : BotMood::Waking);
-    beep(1800, 250);
+
+  const bool settled = now - touch.lastEdge >= BoardConfig::kTouchDebounceMs;
+  if (settled && raw != touch.stable) {
+    touch.stable = raw;
+    if (raw) {
+      touch.pressedAt = now;
+      touch.holdFired = false;
+      bot.noteActivity(now);
+      beep(2600, 18);
+    } else {
+      const uint32_t heldFor = now - touch.pressedAt;
+      if (!touch.holdFired && heldFor <= BoardConfig::kTouchTapMaxMs) onTouchTap();
+    }
   }
-  if (!down && touchWasDown && !touchHeld) {
-    bot.setMood(BotMood::Petted);
-    beep(2200, 70);
+
+  float progress = 0.0f;
+  if (touch.stable) {
+    const uint32_t heldFor = now - touch.pressedAt;
+    progress = static_cast<float>(heldFor) / BoardConfig::kTouchHoldMs;
+    if (progress > 1.0f) progress = 1.0f;
+    if (!touch.holdFired && heldFor >= BoardConfig::kTouchHoldMs) {
+      touch.holdFired = true;
+      onTouchHold();
+    }
   }
-  touchWasDown = down;
+  bot.setTouch(touch.stable, progress);
 }
 }
 
 void setup() {
   Serial.begin(115200);
   delay(250);
-  Serial.println("\n[pcbot] boot");
-  Serial.printf("[pcbot] flash=%u bytes, psram=%u bytes\n",
+  Serial.printf("\n[pico] %s boot\n", BoardConfig::kProductFullName);
+  Serial.printf("[pico] flash=%u bytes, psram=%u bytes\n",
                 ESP.getFlashChipSize(), ESP.getPsramSize());
   setenv("TZ", "UTC0", 1);
   tzset();
-  pinMode(BoardConfig::kTouchPin, INPUT);
+  pinMode(BoardConfig::kTouchPin, BoardConfig::kTouchPinMode);
   pinMode(BoardConfig::kBuzzerPin, OUTPUT);
+  // Full-scale attenuation so the knob covers the whole 0-3.3 V swing.
+  analogSetPinAttenuation(BoardConfig::kPotPin, ADC_11db);
+  // ADC1_CH2 (GPIO 3) for the volume potentiometer.
+  // 11 dB attenuation → full 0–3.3 V input range on ESP32-S3.
+  analogSetAttenuation(ADC_11db);
+  pinMode(BoardConfig::kPotPin, INPUT);
+  Serial.printf("[pico] touch pin %u idle level=%d (active %s)\n",
+                BoardConfig::kTouchPin, digitalRead(BoardConfig::kTouchPin),
+                BoardConfig::kTouchActiveHigh ? "high" : "low");
   bot.begin();
   bot.setMood(BotMood::Boot);
 
-  if (digitalRead(BoardConfig::kTouchPin) == HIGH) {
+  if (touchIsActive()) {
     const uint32_t recoveryStarted = millis();
     bot.setMood(BotMood::Resetting, "Hold 5s for Wi-Fi setup");
-    while (digitalRead(BoardConfig::kTouchPin) == HIGH &&
-           millis() - recoveryStarted < 5000) {
+    while (touchIsActive() && millis() - recoveryStarted < 5000) {
       bot.tick(millis());
       delay(5);
     }
-    if (digitalRead(BoardConfig::kTouchPin) == HIGH) {
+    if (touchIsActive()) {
       configStore.clearWifi();
       beep(1800, 250);
       bot.setMood(BotMood::Provisioning, "Wi-Fi setup enabled");
@@ -312,9 +498,13 @@ void setup() {
 
   configStore.load(config);
   rootTopic = "pcbot/v1/" + config.deviceId;
+  // MQTT timestamps stay UTC (they use gmtime); this only drives the clock.
+  setenv("TZ", config.timezone.c_str(), 1);
+  tzset();
+  Serial.printf("[pico] timezone %s\n", config.timezone.c_str());
 
   if (!config.ready()) {
-    Serial.println("[pcbot] configuration required");
+    Serial.println("[pico] configuration required");
     bot.setMood(BotMood::Provisioning);
     provisioner.begin(&config, &configStore);
     bot.setProvisioningInfo(provisioner.apSsid(), provisioner.apPassword(),
@@ -325,7 +515,9 @@ void setup() {
   bot.setMood(BotMood::Connecting, "Wi-Fi");
   Serial.printf("[wifi] connecting to %s\n", config.wifiSsid.c_str());
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(config.wifiSsid.c_str(), config.wifiPassword.c_str());
+  lastWifiAttempt = millis();
   tlsClient.setCACert(config.rootCa.c_str());
   mqtt.begin(config.mqttHost.c_str(), config.mqttPort, tlsClient);
   mqtt.onMessage(onMessage);
@@ -334,29 +526,50 @@ void setup() {
 
 void loop() {
   uint32_t now = millis();
+  // Touch is sampled first and on every path so the pad stays alive during
+  // setup mode, Wi-Fi outages and broker retries.
+  handleTouch(now);
+  handlePotentiometer(now);
   bot.tick(now);
+  // The display owns the power-saver decision; the clock screen is the single
+  // signal for when the controller may slow down.
+  applyPowerProfile(!bot.powerSaverActive());
+
   if (provisioner.active()) {
     provisioner.tick();
     if (provisioner.rebootRequested()) {
       delay(500);
       ESP.restart();
     }
-    delay(5);
+    delay(2);
     return;
   }
 
-  handleTouch(now);
   if (WiFi.status() != WL_CONNECTED) {
     bot.setMood(BotMood::Disconnected, "Wi-Fi offline");
-    delay(10);
+    if (now - lastWifiAttempt >= BoardConfig::kWifiRetryMs) {
+      lastWifiAttempt = now;
+      Serial.println("[wifi] retrying association");
+      WiFi.disconnect();
+      WiFi.begin(config.wifiSsid.c_str(), config.wifiPassword.c_str());
+    }
+    delay(2);
     return;
   }
   connectMqtt(now);
   mqtt.loop();
   handlePendingCommand();
+  handleVolumeKnob(now);
+
+  // Refresh link strength between telemetry messages so the network tile stays
+  // live even while the PC is quiet.
+  if (now - lastRssiSample >= 2000) {
+    lastRssiSample = now;
+    bot.setNetwork(NAN, NAN, static_cast<int16_t>(WiFi.RSSI()));
+  }
 
   if (lastTelemetry && now - lastTelemetry > BoardConfig::kTelemetryLostMs && pcOnline) {
     bot.setMood(BotMood::Warning, "PC data lost");
   }
-  delay(5);
+  delay(2);
 }

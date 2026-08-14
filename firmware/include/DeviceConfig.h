@@ -13,6 +13,9 @@ struct DeviceConfig {
   String pcMac;
   String broadcastIp = "255.255.255.255";
   String rootCa;
+  // POSIX TZ string (for example "CET-1CEST,M3.5.0,M10.5.0/3"). Only affects
+  // the local clock screen; MQTT timestamps stay UTC.
+  String timezone = "UTC0";
 
   // Returns an empty string when valid, or a human-readable description of
   // the first failing field so the provisioner can surface a precise error.

@@ -1,0 +1,12 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "author": "Pico Assistant",
+    "description": {
+        "": "Parametric tilting L-base case for a 3.2in ILI9341 TFT, ESP32-S3 Super Mini, TTP223 and EC11."
+    },
+    "version": "1.0.0",
+    "runOnStartup": false,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

@@ -25,14 +25,18 @@ class BleProvisioning {
       final legacyBluetooth =
           permissions[Permission.locationWhenInUse]?.isGranted == true;
       if (!modernBluetooth && !legacyBluetooth) {
-        throw StateError('Bluetooth permission is required to find PC Bot.');
+        throw StateError('Bluetooth permission is required to find Pico Assistant.');
       }
     }
     await FlutterBluePlus.stopScan();
     await FlutterBluePlus.startScan(withServices: [serviceUuid], timeout: const Duration(seconds: 8));
     await FlutterBluePlus.isScanning.where((value) => !value).first;
     return FlutterBluePlus.lastScanResults
-        .where((result) => result.device.platformName.startsWith('PC Bot'))
+        // Firmware advertises "Pico Assistant <deviceId>"; older units still
+        // advertise the previous "PC Bot <deviceId>" name.
+        .where((result) =>
+            result.device.platformName.startsWith('Pico Assistant') ||
+            result.device.platformName.startsWith('PC Bot'))
         .toList(growable: false);
   }
 

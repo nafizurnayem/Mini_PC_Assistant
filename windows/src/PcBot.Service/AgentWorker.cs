@@ -71,6 +71,7 @@ public sealed class AgentWorker(
         var subscriptions = new MqttClientSubscribeOptionsBuilder()
             .WithTopicFilter(f => f.WithTopic(_topics.PowerCommand).WithAtLeastOnceQoS())
             .WithTopicFilter(f => f.WithTopic(_topics.SpeedTestCommand).WithAtLeastOnceQoS())
+            .WithTopicFilter(f => f.WithTopic(_topics.VolumeCommand).WithAtLeastOnceQoS())
             .Build();
         await _client.SubscribeAsync(subscriptions, cancellationToken);
         await PublishPcStateAsync("online", cancellationToken);
@@ -82,6 +83,21 @@ public sealed class AgentWorker(
         await _commandLock.WaitAsync();
         try {
             var payload = args.ApplicationMessage.ConvertPayloadToString();
+            var msgTopic = args.ApplicationMessage.Topic;
+
+            // VolumeSetpoint is NOT a CommandEnvelope — it is a continuously updated
+            // absolute value. Handle it first, before the CommandEnvelope path.
+            if (msgTopic == _topics.VolumeCommand)
+            {
+                var setpoint = JsonSerializer.Deserialize<VolumeSetpoint>(payload, _json);
+                if (setpoint is null) return;
+                // Discard stale setpoints so a knob backlog doesn’t replay.
+                if (DateTimeOffset.UtcNow - setpoint.Timestamp > TimeSpan.FromSeconds(2)) return;
+                VolumeController.SetLevel(setpoint.Level);
+                logger.LogInformation("Volume set to {Level}% by {Source}", setpoint.Level, setpoint.Source);
+                return;
+            }
+
             var command = JsonSerializer.Deserialize<CommandEnvelope>(payload, _json);
             if (command is null || string.IsNullOrWhiteSpace(command.CommandId)) return;
             if (command.IsExpired(DateTimeOffset.UtcNow)) {

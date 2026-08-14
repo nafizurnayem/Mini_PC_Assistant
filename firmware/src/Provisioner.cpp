@@ -19,7 +19,7 @@ const char kPortalHtml[] PROGMEM = R"HTML(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>PC Bot Setup</title>
+  <title>Pico Assistant Setup</title>
   <style>
     :root{color-scheme:dark;--bg:#050914;--card:#0b1424;--edge:#233754;--cyan:#25e6ff;--green:#4dff9a;--pink:#ff3cac;--muted:#8ea1b9}
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#10233b 0,var(--bg) 48%);font:15px system-ui,sans-serif;color:#eef7ff;min-height:100vh}
@@ -37,8 +37,8 @@ const char kPortalHtml[] PROGMEM = R"HTML(
   </style>
 </head>
 <body><main>
-  <div class="brand"><div class="mark"></div><div><h1>PC <span class="tag">//BOT</span></h1><div class="hint">SECURE DEVICE ONBOARDING</div></div></div>
-  <div class="status">Connected directly to the bot. Configure the destination Wi-Fi and private MQTT account, then the bot will restart.</div>
+  <div class="brand"><div class="mark"></div><div><h1>PICO <span class="tag">ASSISTANT</span></h1><div class="hint">SECURE DEVICE ONBOARDING</div></div></div>
+  <div class="status">Connected directly to the assistant. Configure the destination Wi-Fi and private MQTT account, then the device will restart.</div>
   <form id="setup">
     <section><h2>01 // WI-FI LINK</h2><div class="grid">
       <label>Network name (SSID)<input id="wifiSsid" name="wifiSsid" list="networks" autocomplete="off" required></label>
@@ -48,7 +48,22 @@ const char kPortalHtml[] PROGMEM = R"HTML(
       <label>Device ID<input name="deviceId" value="desktop-01" required pattern="[A-Za-z0-9_-]{2,32}"></label>
       <label>PC MAC address<input name="pcMac" placeholder="AA:BB:CC:DD:EE:FF" required></label>
       <label>LAN broadcast IP<input name="broadcastIp" value="255.255.255.255" required></label>
-    </div></section>
+      <label>Time zone (clock screen)<input name="timezone" list="zones" value="UTC0" required></label>
+    </div><datalist id="zones">
+      <option value="UTC0">UTC</option>
+      <option value="GMT0BST,M3.5.0/1,M10.5.0">United Kingdom</option>
+      <option value="CET-1CEST,M3.5.0,M10.5.0/3">Central Europe</option>
+      <option value="EET-2EEST,M3.5.0/3,M10.5.0/4">Eastern Europe</option>
+      <option value="EST5EDT,M3.2.0,M11.1.0">US Eastern</option>
+      <option value="CST6CDT,M3.2.0,M11.1.0">US Central</option>
+      <option value="PST8PDT,M3.2.0,M11.1.0">US Pacific</option>
+      <option value="IST-5:30">India</option>
+      <option value="&lt;+06&gt;-6">Bangladesh</option>
+      <option value="&lt;+04&gt;-4">Gulf</option>
+      <option value="CST-8">China</option>
+      <option value="JST-9">Japan</option>
+      <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Sydney</option>
+    </datalist></section>
     <section><h2>03 // MQTT CLOUD</h2><div class="grid">
       <label>Broker host<input name="mqttHost" placeholder="cluster.hivemq.cloud" required></label>
       <label>TLS port<input name="mqttPort" type="number" value="8883" min="1" max="65535" required></label>
@@ -125,6 +140,8 @@ bool Provisioner::applyConfigJson(const String& json, String& status) {
   config_->pcMac = doc["pcMac"] | "";
   config_->broadcastIp = doc["broadcastIp"] | "255.255.255.255";
   config_->rootCa = doc["rootCa"] | config_->rootCa;
+  config_->timezone = doc["timezone"] | config_->timezone;
+  if (config_->timezone.isEmpty()) config_->timezone = "UTC0";
   const String err = config_->validationError();
   if (!err.isEmpty()) {
     status = err;
@@ -147,8 +164,8 @@ void Provisioner::startAccessPoint() {
   char secret[9];
   snprintf(secret, sizeof(secret), "%08lX",
            static_cast<unsigned long>(esp_random()));
-  apSsid_ = "PCBOT-" + String(suffix);
-  apPassword_ = "BOT-" + String(secret);
+  apSsid_ = String(BoardConfig::kSetupApPrefix) + String(suffix);
+  apPassword_ = "PICO-" + String(secret);
 
   WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(apSsid_.c_str(), apPassword_.c_str(), 1, false, 2);
@@ -165,6 +182,7 @@ void Provisioner::handleConfig() {
   doc["mqttUsername"] = config_->mqttUsername;
   doc["pcMac"] = config_->pcMac;
   doc["broadcastIp"] = config_->broadcastIp;
+  doc["timezone"] = config_->timezone;
   String payload;
   serializeJson(doc, payload);
   webServer_.send(200, "application/json", payload);
@@ -213,6 +231,7 @@ void Provisioner::handleSave() {
   doc["pcMac"] = webServer_.arg("pcMac");
   doc["broadcastIp"] = webServer_.arg("broadcastIp");
   doc["rootCa"] = rootCa;
+  doc["timezone"] = webServer_.arg("timezone");
 
   String json;
   serializeJson(doc, json);
@@ -259,7 +278,9 @@ void Provisioner::begin(DeviceConfig* config, ConfigStore* store) {
   Serial.printf("[setup] AP %s active at %s\n", apSsid_.c_str(),
                 setupUrl().c_str());
 
-  NimBLEDevice::init(("PC Bot " + config->deviceId).c_str());
+  NimBLEDevice::init((String(BoardConfig::kProductFullName) + " " +
+                      config->deviceId)
+                         .c_str());
   NimBLEDevice::setSecurityAuth(true, true, true);
   auto* server = NimBLEDevice::createServer();
   auto* service = server->createService(BoardConfig::kBleServiceUuid);

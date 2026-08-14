@@ -1,10 +1,14 @@
-# PC Assistant Bot
+# Pico Assistant
 
-PC Assistant Bot is a physical and remote control system for a Windows PC. An
+Pico Assistant is a physical and remote control system for a Windows PC. An
 ESP32-S3 drives a 3.2-inch ILI9341 display, handles local Wake-on-LAN, and
 provides touch/buzzer feedback. A Windows service publishes hardware telemetry
 and performs graceful shutdown. Flutter and Home Assistant provide remote
 control through a TLS MQTT broker.
+
+The MQTT topic namespace (`pcbot/v1/...`), Windows service name, and mobile
+package identifiers intentionally keep their original names so existing
+installations keep working after the rename.
 
 ## Repository
 
@@ -42,8 +46,9 @@ option for LAN-only testing; do not forward an unencrypted MQTT port.
 ## Deployment order
 
 1. Create the MQTT broker and dedicated credentials.
-2. Power the ESP32 and connect to the TFT-displayed `PCBOT-xxxxxx` hotspot.
-3. Open `http://192.168.4.1`, enter Wi-Fi, MQTT TLS, MAC, and broadcast details.
+2. Power the ESP32 and connect to the TFT-displayed `PICO-xxxxxx` hotspot.
+3. Open `http://192.168.4.1`, enter Wi-Fi, time zone, MQTT TLS, MAC, and
+   broadcast details.
 4. Build and open the Windows control panel, save its dedicated credential, and
    install the service from an elevated terminal.
 5. Build/install the Flutter app or use Home Assistant.

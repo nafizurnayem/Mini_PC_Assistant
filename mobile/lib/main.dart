@@ -21,7 +21,7 @@ class PcBotApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'PC Bot',
+        title: 'Pico Assistant',
         debugShowCheckedModeBanner: false,
         theme: buildBotTheme(),
         home: const HomeScreen(),
@@ -161,20 +161,33 @@ class HistoryScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppController>();
-    if (state.history.isEmpty && state.alerts.isEmpty) return const Center(child: Text('No telemetry yet'));
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      Text('Alerts', style: Theme.of(context).textTheme.titleLarge),
-      for (final alert in state.alerts) ListTile(
-        leading: Icon(alert['severity'] == 'critical' ? Icons.error : Icons.warning_amber),
-        title: Text(alert['message']?.toString() ?? 'Alert'),
-        subtitle: Text(alert['timestamp']?.toString() ?? ''),
-      ),
-      Text('Recent telemetry', style: Theme.of(context).textTheme.titleLarge),
-      for (final item in state.history) ListTile(
-        title: Text('CPU ${fmt(item.cpuTemp)}°C · GPU ${fmt(item.gpuTemp)}°C · RAM ${fmt(item.memoryUsed)}%'),
-        subtitle: Text(item.timestamp.toLocal().toString()),
-      ),
-    ]);
+    final alerts = state.alerts;
+    final history = state.history;
+    if (history.isEmpty && alerts.isEmpty) return const Center(child: Text('No telemetry yet'));
+    final itemCount = 1 + alerts.length + 1 + history.length;
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: itemCount,
+      itemBuilder: (context, i) {
+        if (i == 0) return Text('Alerts', style: Theme.of(context).textTheme.titleLarge);
+        var index = i - 1;
+        if (index < alerts.length) {
+          final alert = alerts[index];
+          return ListTile(
+            leading: Icon(alert['severity'] == 'critical' ? Icons.error : Icons.warning_amber),
+            title: Text(alert['message']?.toString() ?? 'Alert'),
+            subtitle: Text(alert['timestamp']?.toString() ?? ''),
+          );
+        }
+        index -= alerts.length;
+        if (index == 0) return Text('Recent telemetry', style: Theme.of(context).textTheme.titleLarge);
+        final item = history[index - 1];
+        return ListTile(
+          title: Text('CPU ${fmt(item.cpuTemp)}°C · GPU ${fmt(item.gpuTemp)}°C · RAM ${fmt(item.memoryUsed)}%'),
+          subtitle: Text(item.timestamp.toLocal().toString()),
+        );
+      },
+    );
   }
 }
 
@@ -263,7 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final devices = await ble.scan();
       if (!mounted) return;
       Navigator.pop(context);
-      if (devices.isEmpty) throw StateError('No PC Bot found. Reset Wi-Fi or factory-reset bot first.');
+      if (devices.isEmpty) throw StateError('No Pico Assistant found. Reset Wi-Fi or factory-reset the device first.');
       final result = await ble.provision(devices.first.device, read(), fields['ssid']!.text, fields['wifiPassword']!.text);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Bot: $result')));
@@ -305,9 +318,6 @@ class StatusChip extends StatelessWidget {
           color: online ? const Color(0x1f4dff9a) : const Color(0x12000000),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: online ? BotColors.green : BotColors.edge),
-          boxShadow: online
-              ? const [BoxShadow(color: Color(0x334dff9a), blurRadius: 12)]
-              : const [],
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.circle, size: 9, color: online ? BotColors.green : Colors.blueGrey),

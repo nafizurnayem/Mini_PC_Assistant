@@ -69,12 +69,12 @@ class AppController extends ChangeNotifier {
       } else if (message.topic.endsWith('/telemetry/system')) {
         telemetry = Telemetry.fromPayload(message.payload);
         history.insert(0, telemetry!);
-        if (history.length > 120) history.removeLast();
+        if (history.length > 60) history.removeLast();
       } else if (message.topic.endsWith('/state/speedtest')) {
         speedResult = SpeedResult.fromPayload(message.payload);
       } else if (message.topic.endsWith('/event/alert')) {
         alerts.insert(0, jsonDecode(message.payload) as Map<String, dynamic>);
-        if (alerts.length > 100) alerts.removeLast();
+        if (alerts.length > 50) alerts.removeLast();
       }
       notifyListeners();
     } catch (exception) {

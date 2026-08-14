@@ -18,6 +18,7 @@ bool ConfigStore::load(DeviceConfig& config) {
   config.pcMac = prefs.getString("pcMac", "");
   config.broadcastIp = prefs.getString("broadcast", "255.255.255.255");
   config.rootCa = prefs.getString("rootCa", "");
+  config.timezone = prefs.getString("tz", "UTC0");
   prefs.end();
   return config.ready();
 }
@@ -34,6 +35,7 @@ bool ConfigStore::save(const DeviceConfig& config) {
   prefs.putString("pcMac", config.pcMac);
   prefs.putString("broadcast", config.broadcastIp);
   prefs.putString("rootCa", config.rootCa);
+  prefs.putString("tz", config.timezone);
   prefs.end();
   return true;
 }

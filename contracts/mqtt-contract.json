@@ -6,9 +6,12 @@
     "powerCommand": "command/power",
     "speedTestCommand": "command/speedtest",
     "resetCommand": "command/reset",
+    "volumeCommand": "command/volume",
     "pcState": "state/pc",
     "botState": "state/bot",
     "speedTestState": "state/speedtest",
+    "mediaState": "state/media",
+    "volumeState": "state/volume",
     "telemetry": "telemetry/system",
     "alert": "event/alert",
     "ack": "event/ack"
@@ -20,6 +23,24 @@
   },
   "telemetry": {
     "required": ["timestamp", "cpu", "gpu", "memory", "storage", "network", "uptimeSeconds"]
+  },
+  "media": {
+    "required": ["status", "title", "artist", "album", "app", "timestamp"],
+    "statuses": ["playing", "paused", "stopped"],
+    "retained": true,
+    "note": "Published by the tray app from the Windows media session. positionSeconds and durationSeconds are optional; players that do not report a timeline omit them."
+  },
+  "volume": {
+    "state": {
+      "required": ["level", "muted", "timestamp"],
+      "retained": true
+    },
+    "setpoint": {
+      "required": ["level", "source", "timestamp"],
+      "qos": 0,
+      "retained": false,
+      "note": "Absolute 0-100 master volume from the bot's knob. Deliberately not a command envelope: it is continuous state, so a late value is worthless rather than worth retrying."
+    }
   },
   "defaults": {
     "commandTtlSeconds": 30,

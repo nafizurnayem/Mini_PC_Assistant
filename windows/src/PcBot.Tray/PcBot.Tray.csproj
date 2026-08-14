@@ -2,10 +2,13 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- Windows.Media.Control (the OS media session) needs the Windows SDK
+         projections, which arrive with the platform-specific target. -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\PcBot.Core\PcBot.Core.csproj" />
     <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
   </ItemGroup>
 </Project>
-
