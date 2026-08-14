@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBot.Service", "src\PcBot.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBot.Tray", "src\PcBot.Tray\PcBot.Tray.csproj", "{C0132DA8-E5D9-43D1-8DCB-3BDDFD6369A9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBot.Tests", "tests\PcBot.Tests\PcBot.Tests.csproj", "{27EC69E7-87E3-47DA-9EEE-ABF14E8B2A67}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,6 +28,9 @@ Global
 		{C0132DA8-E5D9-43D1-8DCB-3BDDFD6369A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C0132DA8-E5D9-43D1-8DCB-3BDDFD6369A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C0132DA8-E5D9-43D1-8DCB-3BDDFD6369A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{27EC69E7-87E3-47DA-9EEE-ABF14E8B2A67}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{27EC69E7-87E3-47DA-9EEE-ABF14E8B2A67}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{27EC69E7-87E3-47DA-9EEE-ABF14E8B2A67}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{27EC69E7-87E3-47DA-9EEE-ABF14E8B2A67}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
-

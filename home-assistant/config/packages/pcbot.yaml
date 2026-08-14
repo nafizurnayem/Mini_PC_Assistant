@@ -1,0 +1,213 @@
+mqtt:
+  binary_sensor:
+    - name: PC Bot PC
+      unique_id: pcbot_desktop_01_pc
+      state_topic: pcbot/v1/desktop-01/state/pc
+      value_template: "{{ value_json.status }}"
+      payload_on: online
+      payload_off: offline
+      device_class: connectivity
+
+    - name: PC Bot Controller
+      unique_id: pcbot_desktop_01_controller
+      state_topic: pcbot/v1/desktop-01/state/bot
+      value_template: "{{ value_json.status }}"
+      payload_on: online
+      payload_off: offline
+      device_class: connectivity
+
+  sensor:
+    - name: PC Bot CPU Temperature
+      unique_id: pcbot_desktop_01_cpu_temperature
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.cpu.temperatureC }}"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+
+    - name: PC Bot CPU Load
+      unique_id: pcbot_desktop_01_cpu_load
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.cpu.loadPercent }}"
+      unit_of_measurement: "%"
+      state_class: measurement
+
+    - name: PC Bot GPU Temperature
+      unique_id: pcbot_desktop_01_gpu_temperature
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.gpu.temperatureC }}"
+      unit_of_measurement: "°C"
+      device_class: temperature
+      state_class: measurement
+
+    - name: PC Bot GPU Load
+      unique_id: pcbot_desktop_01_gpu_load
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.gpu.loadPercent }}"
+      unit_of_measurement: "%"
+      state_class: measurement
+
+    - name: PC Bot Memory
+      unique_id: pcbot_desktop_01_memory
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.memory.usedPercent }}"
+      unit_of_measurement: "%"
+      state_class: measurement
+
+    - name: PC Bot Download
+      unique_id: pcbot_desktop_01_download
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.network.downloadMbps }}"
+      unit_of_measurement: "Mbit/s"
+      device_class: data_rate
+      state_class: measurement
+
+    - name: PC Bot Upload
+      unique_id: pcbot_desktop_01_upload
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.network.uploadMbps }}"
+      unit_of_measurement: "Mbit/s"
+      device_class: data_rate
+      state_class: measurement
+
+    - name: PC Bot Uptime
+      unique_id: pcbot_desktop_01_uptime
+      state_topic: pcbot/v1/desktop-01/telemetry/system
+      value_template: "{{ value_json.uptimeSeconds }}"
+      unit_of_measurement: "s"
+      device_class: duration
+      state_class: total_increasing
+
+    - name: PC Bot Speed Test Status
+      unique_id: pcbot_desktop_01_speed_status
+      state_topic: pcbot/v1/desktop-01/state/speedtest
+      value_template: "{{ value_json.status }}"
+
+    - name: PC Bot Speed Test Download
+      unique_id: pcbot_desktop_01_speed_download
+      state_topic: pcbot/v1/desktop-01/state/speedtest
+      value_template: "{{ value_json.downloadMbps | default(none) }}"
+      unit_of_measurement: "Mbit/s"
+      device_class: data_rate
+      state_class: measurement
+
+    - name: PC Bot Speed Test Upload
+      unique_id: pcbot_desktop_01_speed_upload
+      state_topic: pcbot/v1/desktop-01/state/speedtest
+      value_template: "{{ value_json.uploadMbps | default(none) }}"
+      unit_of_measurement: "Mbit/s"
+      device_class: data_rate
+      state_class: measurement
+
+    - name: PC Bot Speed Test Ping
+      unique_id: pcbot_desktop_01_speed_ping
+      state_topic: pcbot/v1/desktop-01/state/speedtest
+      value_template: "{{ value_json.pingMs | default(none) }}"
+      unit_of_measurement: "ms"
+      device_class: duration
+      state_class: measurement
+
+    - name: PC Bot Latest Alert
+      unique_id: pcbot_desktop_01_latest_alert
+      state_topic: pcbot/v1/desktop-01/event/alert
+      value_template: "{{ value_json.message }}"
+      json_attributes_topic: pcbot/v1/desktop-01/event/alert
+
+script:
+  pcbot_power_on:
+    alias: PC Bot - Wake PC
+    sequence:
+      - variables: &command_variables
+          command_id: "ha-{{ now().timestamp() | int }}-{{ range(1000, 9999) | random }}"
+          issued_at: "{{ utcnow().strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+          expires_at: "{{ (utcnow() + timedelta(seconds=30)).strftime('%Y-%m-%dT%H:%M:%SZ') }}"
+      - action: mqtt.publish
+        data:
+          topic: pcbot/v1/desktop-01/command/power
+          qos: 1
+          retain: false
+          payload: >-
+            {"commandId":"{{ command_id }}","source":"home-assistant","action":"on",
+            "issuedAt":"{{ issued_at }}","expiresAt":"{{ expires_at }}"}
+
+  pcbot_power_off:
+    alias: PC Bot - Shut Down PC
+    sequence:
+      - variables: *command_variables
+      - action: mqtt.publish
+        data:
+          topic: pcbot/v1/desktop-01/command/power
+          qos: 1
+          retain: false
+          payload: >-
+            {"commandId":"{{ command_id }}","source":"home-assistant","action":"off",
+            "issuedAt":"{{ issued_at }}","expiresAt":"{{ expires_at }}"}
+
+  pcbot_speed_test:
+    alias: PC Bot - Run Speed Test
+    sequence:
+      - variables: *command_variables
+      - action: mqtt.publish
+        data:
+          topic: pcbot/v1/desktop-01/command/speedtest
+          qos: 1
+          retain: false
+          payload: >-
+            {"commandId":"{{ command_id }}","source":"home-assistant","action":"run",
+            "issuedAt":"{{ issued_at }}","expiresAt":"{{ expires_at }}"}
+
+  pcbot_wifi_reset:
+    alias: PC Bot - Reset Wi-Fi
+    sequence:
+      - variables: *command_variables
+      - action: mqtt.publish
+        data:
+          topic: pcbot/v1/desktop-01/command/reset
+          qos: 1
+          retain: false
+          payload: >-
+            {"commandId":"{{ command_id }}","source":"home-assistant","action":"wifi",
+            "issuedAt":"{{ issued_at }}","expiresAt":"{{ expires_at }}"}
+
+  pcbot_factory_reset:
+    alias: PC Bot - Factory Reset
+    sequence:
+      - variables: *command_variables
+      - action: mqtt.publish
+        data:
+          topic: pcbot/v1/desktop-01/command/reset
+          qos: 1
+          retain: false
+          payload: >-
+            {"commandId":"{{ command_id }}","source":"home-assistant","action":"factory",
+            "issuedAt":"{{ issued_at }}","expiresAt":"{{ expires_at }}"}
+
+template:
+  - switch:
+      - name: PC Bot Power
+        unique_id: pcbot_desktop_01_power
+        state: "{{ is_state('binary_sensor.pc_bot_pc', 'on') }}"
+        availability: "{{ has_value('binary_sensor.pc_bot_controller') }}"
+        turn_on:
+          - action: script.pcbot_power_on
+        turn_off:
+          - action: script.pcbot_power_off
+
+  - button:
+      - name: PC Bot Speed Test
+        unique_id: pcbot_desktop_01_speed_test
+        icon: mdi:speedometer
+        press:
+          - action: script.pcbot_speed_test
+
+      - name: PC Bot Wi-Fi Reset
+        unique_id: pcbot_desktop_01_wifi_reset
+        icon: mdi:wifi-refresh
+        press:
+          - action: script.pcbot_wifi_reset
+
+      - name: PC Bot Factory Reset
+        unique_id: pcbot_desktop_01_factory_reset
+        icon: mdi:delete-alert
+        press:
+          - action: script.pcbot_factory_reset

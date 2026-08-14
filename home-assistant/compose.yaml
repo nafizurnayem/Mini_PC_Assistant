@@ -1,0 +1,39 @@
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: pcbot-homeassistant
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Dhaka}
+    volumes:
+      - ./config:/config
+    networks:
+      - pcbot
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: pcbot-caddy
+    restart: unless-stopped
+    depends_on:
+      - homeassistant
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - pcbot
+
+networks:
+  pcbot:
+    ipam:
+      config:
+        - subnet: 172.31.44.0/24
+
+volumes:
+  caddy_data:
+  caddy_config:

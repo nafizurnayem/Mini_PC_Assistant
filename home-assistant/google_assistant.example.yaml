@@ -1,0 +1,19 @@
+# Optional manual Google Assistant configuration.
+# Copy the contents into configuration.yaml only after creating the Google
+# service account described in the Home Assistant Google Assistant guide.
+google_assistant:
+  project_id: replace-with-google-cloud-project-id
+  service_account: !include google-service-account.json
+  report_state: true
+  expose_by_default: false
+  entity_config:
+    switch.pc_bot_power:
+      expose: true
+      name: Gaming PC
+      room: Office
+    sensor.pc_bot_cpu_temperature:
+      expose: true
+      name: PC CPU Temperature
+    sensor.pc_bot_gpu_temperature:
+      expose: true
+      name: PC GPU Temperature

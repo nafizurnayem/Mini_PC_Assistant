@@ -1,7 +1,7 @@
 # Mobile app
 
-Run `./bootstrap.ps1` after installing Flutter. It generates Android/iOS host
-projects around committed Dart source.
+Run `./bootstrap.ps1` after installing Flutter. Android and iOS host projects,
+permissions, tests, and the gaming-style responsive UI are committed.
 
 Android manifest permissions required:
 
@@ -23,3 +23,11 @@ iOS `Info.plist` keys required:
 
 iOS signing and physical BLE testing require macOS, Xcode, and an Apple
 developer identity. MQTT credentials remain in Keychain/Android Keystore.
+
+Build Android with `flutter build apk --release` after installing Android Studio
+or an Android SDK accepted by `flutter doctor`. Before publishing, copy
+`android/key.properties.example` to `android/key.properties`, create a private
+release keystore, and replace every placeholder. Without that file Gradle uses
+debug signing for local release-mode testing only. The app supports live telemetry,
+alert/history views, Wake-on-LAN and graceful-shutdown confirmation, speed
+tests, encrypted BLE provisioning, Wi-Fi recovery, and protected factory reset.

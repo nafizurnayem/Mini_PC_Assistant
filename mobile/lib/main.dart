@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app_controller.dart';
+import 'app_theme.dart';
 import 'ble_provisioning.dart';
 import 'models.dart';
 import 'mqtt_service.dart';
@@ -21,10 +22,8 @@ class PcBotApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'PC Bot',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff6750a4), brightness: Brightness.dark),
-          useMaterial3: true,
-        ),
+        debugShowCheckedModeBanner: false,
+        theme: buildBotTheme(),
         home: const HomeScreen(),
       );
 }
@@ -42,8 +41,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pages = [const Dashboard(), const HistoryScreen(), const SettingsScreen()];
     return Scaffold(
-      appBar: AppBar(title: const Text('PC Assistant Bot')),
-      body: pages[index],
+      appBar: AppBar(
+        title: const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('PC // BOT', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 2)),
+          Text('REMOTE COMMAND CORE',
+              style: TextStyle(fontSize: 10, color: BotColors.cyan, letterSpacing: 1.4)),
+        ]),
+      ),
+      body: GridBackdrop(
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 240),
+          child: KeyedSubtree(key: ValueKey(index), child: pages[index]),
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: index,
         onDestinationSelected: (value) => setState(() => index = value),
@@ -69,11 +79,9 @@ class Dashboard extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(children: [
-            StatusChip('Cloud', state.connected),
-            const SizedBox(width: 8),
-            StatusChip('Bot', state.botOnline),
-            const SizedBox(width: 8),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            StatusChip('CLOUD', state.connected),
+            StatusChip('BOT', state.botOnline),
             StatusChip('PC', state.pcOnline),
           ]),
           if (state.error != null) Padding(
@@ -81,24 +89,40 @@ class Dashboard extends StatelessWidget {
             child: Text(state.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ),
           const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: state.connected ? () => _confirmPower(context, state) : null,
-            icon: const Icon(Icons.power_settings_new),
-            label: Text(state.pcOnline ? 'Shut down PC' : 'Wake PC'),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: state.pcOnline ? state.runSpeedTest : null,
-            icon: const Icon(Icons.speed),
-            label: const Text('Run internet speed test'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                const Text('COMMAND DECK',
+                    style: TextStyle(color: BotColors.cyan, fontWeight: FontWeight.w700, letterSpacing: 1.6)),
+                const SizedBox(height: 14),
+                FilledButton.icon(
+                  onPressed: state.connected ? () => _confirmPower(context, state) : null,
+                  icon: const Icon(Icons.power_settings_new),
+                  label: Text(state.pcOnline ? 'SHUT DOWN PC' : 'WAKE PC'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: state.pcOnline ? state.runSpeedTest : null,
+                  icon: const Icon(Icons.speed),
+                  label: const Text('RUN SPEED TEST'),
+                ),
+              ]),
+            ),
           ),
           const SizedBox(height: 20),
-          Wrap(spacing: 12, runSpacing: 12, children: [
-            MetricCard('CPU', telemetry?.cpuTemp, '°C', telemetry?.cpuLoad, '% load'),
-            MetricCard('GPU', telemetry?.gpuTemp, '°C', telemetry?.gpuLoad, '% load'),
-            MetricCard('RAM', telemetry?.memoryUsed, '%', null, ''),
-            MetricCard('Download', telemetry?.downloadMbps, 'Mbps', telemetry?.uploadMbps, 'Mbps up'),
-          ]),
+          LayoutBuilder(builder: (context, constraints) {
+            final width = constraints.maxWidth >= 720
+                ? (constraints.maxWidth - 36) / 4
+                : (constraints.maxWidth - 12) / 2;
+            return Wrap(spacing: 12, runSpacing: 12, children: [
+              MetricCard('CPU', telemetry?.cpuTemp, '°C', telemetry?.cpuLoad, '% load', width: width),
+              MetricCard('GPU', telemetry?.gpuTemp, '°C', telemetry?.gpuLoad, '% load', width: width),
+              MetricCard('RAM', telemetry?.memoryUsed, '%', null, '', width: width),
+              MetricCard('NETWORK', telemetry?.downloadMbps, 'Mbps',
+                  telemetry?.uploadMbps, 'Mbps up', width: width),
+            ]);
+          }),
           if (state.speedResult != null) Card(
             child: ListTile(
               leading: const Icon(Icons.network_check),
@@ -274,29 +298,52 @@ class StatusChip extends StatelessWidget {
   final String label;
   final bool online;
   @override
-  Widget build(BuildContext context) => Chip(
-    avatar: Icon(Icons.circle, size: 12, color: online ? Colors.greenAccent : Colors.grey),
-    label: Text(label),
-  );
+  Widget build(BuildContext context) => AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: online ? const Color(0x1f4dff9a) : const Color(0x12000000),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: online ? BotColors.green : BotColors.edge),
+          boxShadow: online
+              ? const [BoxShadow(color: Color(0x334dff9a), blurRadius: 12)]
+              : const [],
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.circle, size: 9, color: online ? BotColors.green : Colors.blueGrey),
+          const SizedBox(width: 7),
+          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.1)),
+        ]),
+      );
 }
 
 class MetricCard extends StatelessWidget {
-  const MetricCard(this.label, this.value, this.unit, this.secondary, this.secondaryUnit, {super.key});
+  const MetricCard(this.label, this.value, this.unit, this.secondary, this.secondaryUnit,
+      {required this.width, super.key});
   final String label;
   final num? value;
   final String unit;
   final num? secondary;
   final String secondaryUnit;
+  final double width;
   @override
-  Widget build(BuildContext context) => SizedBox(width: 165, child: Card(child: Padding(
+  Widget build(BuildContext context) => SizedBox(width: width, child: Card(child: Padding(
     padding: const EdgeInsets.all(16),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: Theme.of(context).textTheme.labelLarge),
-      Text('${fmt(value)} $unit', style: Theme.of(context).textTheme.headlineSmall),
+      Text(label, style: const TextStyle(color: BotColors.cyan, fontSize: 11,
+          fontWeight: FontWeight.w700, letterSpacing: 1.3)),
+      const SizedBox(height: 8),
+      TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: value?.toDouble() ?? 0),
+        duration: const Duration(milliseconds: 350),
+        builder: (_, animated, __) => Text(
+          value == null ? '—' : '${animated.toStringAsFixed(1)} $unit',
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+        ),
+      ),
       if (secondary != null) Text('${fmt(secondary)} $secondaryUnit'),
     ]),
   )));
 }
 
 String fmt(num? value) => value == null ? '—' : value.toStringAsFixed(1);
-

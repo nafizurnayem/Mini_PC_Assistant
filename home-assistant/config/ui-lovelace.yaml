@@ -1,0 +1,87 @@
+title: PC // BOT
+views:
+  - title: Command Center
+    path: pcbot
+    icon: mdi:robot
+    cards:
+      - type: entities
+        title: Link Status
+        show_header_toggle: false
+        entities:
+          - binary_sensor.pc_bot_controller
+          - binary_sensor.pc_bot_pc
+          - switch.pc_bot_power
+
+      - type: grid
+        title: Live Telemetry
+        columns: 2
+        square: false
+        cards:
+          - type: gauge
+            entity: sensor.pc_bot_cpu_temperature
+            name: CPU
+            min: 20
+            max: 100
+            severity: {green: 20, yellow: 75, red: 90}
+          - type: gauge
+            entity: sensor.pc_bot_gpu_temperature
+            name: GPU
+            min: 20
+            max: 100
+            severity: {green: 20, yellow: 75, red: 88}
+          - type: gauge
+            entity: sensor.pc_bot_memory
+            name: RAM
+            min: 0
+            max: 100
+            severity: {green: 0, yellow: 80, red: 95}
+          - type: entities
+            title: Network
+            entities:
+              - sensor.pc_bot_download
+              - sensor.pc_bot_upload
+              - sensor.pc_bot_uptime
+
+      - type: horizontal-stack
+        cards:
+          - type: button
+            entity: button.pc_bot_speed_test
+            name: Speed Test
+          - type: button
+            entity: button.pc_bot_wifi_reset
+            name: Reset Wi-Fi
+            tap_action:
+              action: call-service
+              service: button.press
+              target: {entity_id: button.pc_bot_wifi_reset}
+              confirmation:
+                text: Reopen the bot setup hotspot?
+          - type: button
+            entity: button.pc_bot_factory_reset
+            name: Factory Reset
+            tap_action:
+              action: call-service
+              service: button.press
+              target: {entity_id: button.pc_bot_factory_reset}
+              confirmation:
+                text: Erase all bot credentials and settings?
+
+      - type: entities
+        title: Speed Test
+        entities:
+          - sensor.pc_bot_speed_test_status
+          - sensor.pc_bot_speed_test_download
+          - sensor.pc_bot_speed_test_upload
+          - sensor.pc_bot_speed_test_ping
+
+      - type: history-graph
+        title: Thermal History
+        hours_to_show: 24
+        entities:
+          - sensor.pc_bot_cpu_temperature
+          - sensor.pc_bot_gpu_temperature
+          - sensor.pc_bot_memory
+
+      - type: entity
+        entity: sensor.pc_bot_latest_alert
+        name: Latest Alert

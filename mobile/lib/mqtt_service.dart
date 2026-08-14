@@ -13,6 +13,13 @@ class TopicMessage {
   final String payload;
 }
 
+String formatUtcSeconds(DateTime value) {
+  final utc = value.toUtc();
+  String two(int number) => number.toString().padLeft(2, '0');
+  return '${utc.year.toString().padLeft(4, '0')}-${two(utc.month)}-'
+      '${two(utc.day)}T${two(utc.hour)}:${two(utc.minute)}:${two(utc.second)}Z';
+}
+
 class MqttService {
   MqttServerClient? _client;
   StreamSubscription? _subscription;
@@ -35,8 +42,12 @@ class MqttService {
       ..autoReconnect = true
       ..resubscribeOnAutoReconnect = true
       ..logging(on: false)
-      ..onConnected = () => _connection.add(true)
-      ..onDisconnected = () => _connection.add(false)
+      ..onConnected = () {
+        _connection.add(true);
+      }
+      ..onDisconnected = () {
+        _connection.add(false);
+      }
       ..connectionMessage = MqttConnectMessage()
           .authenticateAs(settings.username, settings.password)
           .startClean()
@@ -68,8 +79,8 @@ class MqttService {
       'commandId': const Uuid().v4(),
       'source': 'mobile',
       'action': action,
-      'issuedAt': now.toIso8601String(),
-      'expiresAt': now.add(const Duration(seconds: 30)).toIso8601String(),
+      'issuedAt': formatUtcSeconds(now),
+      'expiresAt': formatUtcSeconds(now.add(const Duration(seconds: 30))),
     });
     final builder = MqttClientPayloadBuilder()..addUTF8String(payload);
     client.publishMessage('${settings.rootTopic}/$topicSuffix', MqttQos.atLeastOnce,
@@ -90,4 +101,3 @@ class MqttService {
     await _connection.close();
   }
 }
-

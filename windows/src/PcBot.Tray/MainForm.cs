@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using MQTTnet;
 using MQTTnet.Client;
 using MQTTnet.Protocol;
@@ -14,15 +17,30 @@ public sealed class MainForm : Form
     private readonly TextBox _username = Field();
     private readonly TextBox _password = Field(true);
     private readonly TextBox _speedTest = Field();
+    private readonly NumericUpDown _telemetryInterval = Number(2, 300, 5);
+    private readonly NumericUpDown _alertSustain = Number(1, 600, 15);
+    private readonly NumericUpDown _alertCooldown = Number(10, 3600, 300);
+    private readonly NumericUpDown _cpuTemp = Number(40, 120, 90);
+    private readonly NumericUpDown _gpuTemp = Number(40, 120, 88);
+    private readonly NumericUpDown _driveTemp = Number(30, 100, 70);
+    private readonly NumericUpDown _memoryUsed = Number(50, 100, 95);
+    private readonly NumericUpDown _driveFree = Number(1, 50, 10);
+    private readonly NumericUpDown _hysteresis = Number(1, 20, 5);
     private readonly Label _status = new() { AutoSize = true, Text = "Ready" };
+    private readonly Label _network = new() { AutoSize = true, MaximumSize = new Size(500, 0) };
 
     public MainForm()
     {
         Text = "PC Assistant Bot";
         Width = 560;
-        Height = 430;
-        MinimumSize = new Size(520, 400);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 2 };
+        Height = 760;
+        MinimumSize = new Size(560, 620);
+        var layout = new TableLayoutPanel {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(16),
+            ColumnCount = 2,
+            AutoScroll = true,
+        };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(layout, "Device ID", _device);
@@ -31,6 +49,20 @@ public sealed class MainForm : Form
         AddRow(layout, "Username", _username);
         AddRow(layout, "Password", _password);
         AddRow(layout, "Speedtest CLI", _speedTest);
+        AddSection(layout, "Monitoring");
+        AddRow(layout, "Telemetry interval (s)", _telemetryInterval);
+        AddRow(layout, "Alert sustain (s)", _alertSustain);
+        AddRow(layout, "Alert cooldown (s)", _alertCooldown);
+        AddRow(layout, "CPU limit (°C)", _cpuTemp);
+        AddRow(layout, "GPU limit (°C)", _gpuTemp);
+        AddRow(layout, "Drive limit (°C)", _driveTemp);
+        AddRow(layout, "RAM limit (%)", _memoryUsed);
+        AddRow(layout, "Minimum drive free (%)", _driveFree);
+        AddRow(layout, "Recovery hysteresis", _hysteresis);
+        AddSection(layout, "LAN diagnostics");
+        layout.Controls.Add(_network, 0, layout.RowCount);
+        layout.SetColumnSpan(_network, 2);
+        layout.RowCount++;
 
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
         buttons.Controls.Add(Button("Save", async (_, _) => await SaveAsync()));
@@ -55,6 +87,16 @@ public sealed class MainForm : Form
         _username.Text = options.Mqtt.Username;
         _password.Text = options.Mqtt.Password;
         _speedTest.Text = options.SpeedTestExecutable;
+        _telemetryInterval.Value = options.TelemetryIntervalSeconds;
+        _alertSustain.Value = options.AlertSustainSeconds;
+        _alertCooldown.Value = options.AlertCooldownSeconds;
+        _cpuTemp.Value = (decimal)options.Thresholds.CpuTempC;
+        _gpuTemp.Value = (decimal)options.Thresholds.GpuTempC;
+        _driveTemp.Value = (decimal)options.Thresholds.DriveTempC;
+        _memoryUsed.Value = (decimal)options.Thresholds.MemoryUsedPercent;
+        _driveFree.Value = (decimal)options.Thresholds.DriveFreePercent;
+        _hysteresis.Value = (decimal)options.Thresholds.Hysteresis;
+        _network.Text = DetectLan();
     }
 
     private AgentOptions ReadOptions()
@@ -66,6 +108,15 @@ public sealed class MainForm : Form
         current.Mqtt.Username = _username.Text;
         current.Mqtt.Password = _password.Text;
         current.SpeedTestExecutable = _speedTest.Text.Trim();
+        current.TelemetryIntervalSeconds = (int)_telemetryInterval.Value;
+        current.AlertSustainSeconds = (int)_alertSustain.Value;
+        current.AlertCooldownSeconds = (int)_alertCooldown.Value;
+        current.Thresholds.CpuTempC = (double)_cpuTemp.Value;
+        current.Thresholds.GpuTempC = (double)_gpuTemp.Value;
+        current.Thresholds.DriveTempC = (double)_driveTemp.Value;
+        current.Thresholds.MemoryUsedPercent = (double)_memoryUsed.Value;
+        current.Thresholds.DriveFreePercent = (double)_driveFree.Value;
+        current.Thresholds.Hysteresis = (double)_hysteresis.Value;
         return current;
     }
 
@@ -135,6 +186,15 @@ public sealed class MainForm : Form
         UseSystemPasswordChar = password,
     };
 
+    private static NumericUpDown Number(decimal minimum, decimal maximum, decimal value) => new()
+    {
+        Dock = DockStyle.Fill,
+        Minimum = minimum,
+        Maximum = maximum,
+        Value = value,
+        DecimalPlaces = 0,
+    };
+
     private static Button Button(string text, EventHandler onClick)
     {
         var button = new Button { Text = text, AutoSize = true };
@@ -149,6 +209,41 @@ public sealed class MainForm : Form
         layout.RowCount++;
     }
 
+    private static void AddSection(TableLayoutPanel layout, string label)
+    {
+        var heading = new Label {
+            Text = label.ToUpperInvariant(),
+            AutoSize = true,
+            Font = new Font("Segoe UI", 9F, FontStyle.Bold),
+            Padding = new Padding(0, 14, 0, 4),
+        };
+        layout.Controls.Add(heading, 0, layout.RowCount);
+        layout.SetColumnSpan(heading, 2);
+        layout.RowCount++;
+    }
+
+    private static string DetectLan()
+    {
+        foreach (var adapter in NetworkInterface.GetAllNetworkInterfaces().Where(value =>
+                     value.OperationalStatus == OperationalStatus.Up &&
+                     value.NetworkInterfaceType is not NetworkInterfaceType.Loopback and
+                         not NetworkInterfaceType.Tunnel))
+        {
+            var address = adapter.GetIPProperties().UnicastAddresses.FirstOrDefault(value =>
+                value.Address.AddressFamily == AddressFamily.InterNetwork && value.IPv4Mask is not null);
+            if (address?.IPv4Mask is null) continue;
+            var ip = address.Address.GetAddressBytes();
+            var mask = address.IPv4Mask.GetAddressBytes();
+            var broadcast = new byte[4];
+            for (var index = 0; index < 4; index++)
+                broadcast[index] = (byte)(ip[index] | ~mask[index]);
+            var mac = string.Join(":", adapter.GetPhysicalAddress().GetAddressBytes()
+                .Select(value => value.ToString("X2")));
+            return $"{adapter.Name}: MAC {mac} · IP {address.Address} · Broadcast {new IPAddress(broadcast)}";
+        }
+        return "No active IPv4 LAN adapter detected.";
+    }
+
     private sealed class MqttSession(IMqttClient client) : IAsyncDisposable
     {
         public IMqttClient Client { get; } = client;
@@ -159,4 +254,3 @@ public sealed class MainForm : Form
         }
     }
 }
-
