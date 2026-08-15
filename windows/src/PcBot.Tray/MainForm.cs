@@ -79,6 +79,21 @@ public sealed class MainForm : Form
         Dock = DockStyle.Fill, BackColor = UiTheme.Ink, AutoScroll = true, Padding = new Padding(20, 18, 20, 18),
     };
     private readonly List<Button> _navButtons = new();
+    private readonly Label _firmwareDevice = new()
+    {
+        AutoSize = true, ForeColor = UiTheme.TextSoft, Font = UiTheme.Body,
+        Margin = new Padding(0, 0, 0, 6), Dock = DockStyle.Top, Text = "Waiting for the device...",
+    };
+    private readonly Label _firmwareFile = new()
+    {
+        AutoSize = true, ForeColor = UiTheme.Text, Font = UiTheme.Body,
+        Margin = new Padding(0, 0, 0, 8), Dock = DockStyle.Top, Text = "No image selected",
+    };
+    private readonly LevelBar _firmwareProgress = new();
+    private readonly FirmwareUpdater _updater = new();
+    private string _firmwarePath = "";
+    private bool _uploading;
+
     private readonly NotifyIcon _tray = new();
     private readonly MediaVolumeAgent _agent = new();
     private readonly System.Windows.Forms.Timer _refresh = new() { Interval = 700 };
@@ -144,7 +159,7 @@ public sealed class MainForm : Form
             Margin = new Padding(7, 0, 6, 20),
         });
 
-        var titles = new[] { "Dashboard", "Connection", "Monitoring", "Device" };
+        var titles = new[] { "Dashboard", "Connection", "Monitoring", "Firmware", "Device" };
         var width = titles.Max(title => TextRenderer.MeasureText(title, UiTheme.Body).Width) + 60;
         for (var index = 0; index < titles.Length; index++)
         {
@@ -189,6 +204,7 @@ public sealed class MainForm : Form
             0 => BuildDashboard(),
             1 => BuildConnection(),
             2 => BuildMonitoring(),
+            3 => BuildFirmware(),
             _ => BuildDevice(),
         };
         _pageHost.Controls.Add(page);
@@ -327,6 +343,98 @@ public sealed class MainForm : Form
         return page;
     }
 
+    private Control BuildFirmware()
+    {
+        var page = Page();
+
+        var device = new CardPanel("Device", UiTheme.Accent);
+        device.Controls.Add(_firmwareDevice);
+        device.Controls.Add(UiTheme.Caption(
+            "Address and update token come from the device's retained status message, so there is nothing to type in."));
+
+        var update = new CardPanel("Install firmware over Wi-Fi", UiTheme.AccentEnd);
+        update.Controls.Add(_firmwareFile);
+        update.Controls.Add(_firmwareProgress);
+        var row = Row();
+        row.Controls.Add(UiTheme.GhostButton("Choose image...", (_, _) => ChooseFirmware()));
+        row.Controls.Add(UiTheme.PrimaryButton("Install", async (_, _) => await UploadFirmwareAsync()));
+        update.Controls.Add(row);
+        update.Controls.Add(UiTheme.Caption(
+            "Built images live in firmware\\.pio\\build\\pcbot-esp32-s3-n4r2\\firmware.bin. " +
+            "The device keeps running its current firmware until the new image is fully received and verified."));
+
+        page.Controls.Add(device);
+        page.Controls.Add(update);
+        return page;
+    }
+
+    private void ChooseFirmware()
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Select firmware image",
+            Filter = "Firmware image (*.bin)|*.bin|All files (*.*)|*.*",
+            InitialDirectory = FindFirmwareDirectory(),
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        _firmwarePath = dialog.FileName;
+        var size = new FileInfo(_firmwarePath).Length / 1024.0;
+        _firmwareFile.Text = $"{Path.GetFileName(_firmwarePath)}   ·   {size:0} KB";
+    }
+
+    /// <summary>Best guess at the PlatformIO output folder, relative to the repo.</summary>
+    private static string FindFirmwareDirectory()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "firmware", ".pio", "build",
+                "pcbot-esp32-s3-n4r2");
+            if (Directory.Exists(candidate)) return candidate;
+            directory = directory.Parent;
+        }
+        return Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    }
+
+    private async Task UploadFirmwareAsync()
+    {
+        if (string.IsNullOrEmpty(_firmwarePath))
+        {
+            _status.Text = "Choose a firmware image first.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_agent.DeviceIp) || string.IsNullOrWhiteSpace(_agent.OtaToken))
+        {
+            _status.Text = "Waiting for the device to report its address. Is it online?";
+            return;
+        }
+        if (_uploading) return;
+
+        _uploading = true;
+        _firmwareProgress.Value = 0;
+        _status.Text = "Uploading firmware...";
+        try
+        {
+            var progress = new Progress<int>(percent =>
+            {
+                _firmwareProgress.Value = percent;
+                _status.Text = $"Uploading firmware... {percent}%";
+            });
+            await _updater.UploadAsync(_agent.DeviceIp, _agent.OtaToken, _firmwarePath,
+                progress, CancellationToken.None);
+            _firmwareProgress.Value = 100;
+            _status.Text = "Image accepted. The device is rebooting into it.";
+        }
+        catch (Exception ex)
+        {
+            _status.Text = $"Update failed: {ex.Message}";
+        }
+        finally
+        {
+            _uploading = false;
+        }
+    }
+
     private Control BuildDevice()
     {
         var page = Page();
@@ -406,6 +514,10 @@ public sealed class MainForm : Form
             _trackProgress.Value = 0;
             _trackTime.Text = "";
         }
+
+        _firmwareDevice.Text = string.IsNullOrWhiteSpace(_agent.DeviceIp)
+            ? "Waiting for the device to report in..."
+            : $"Firmware {_agent.DeviceVersion}   at   {_agent.DeviceIp}";
 
         _volumeValue.Text = _agent.Muted ? "Muted" : $"{_agent.Volume}%";
         // Never fight the user's hand: skip the sync while the knob is held.

@@ -16,6 +16,9 @@ struct DeviceConfig {
   // POSIX TZ string (for example "CET-1CEST,M3.5.0,M10.5.0/3"). Only affects
   // the local clock screen; MQTT timestamps stay UTC.
   String timezone = "UTC0";
+  // Random per-device secret guarding the LAN firmware upload endpoint.
+  // Generated on first boot and published on state/bot for the desktop app.
+  String otaToken;
 
   // Returns an empty string when valid, or a human-readable description of
   // the first failing field so the provisioner can surface a precise error.

@@ -9,6 +9,7 @@
 #include "BoardConfig.h"
 #include "BotDisplay.h"
 #include "DeviceConfig.h"
+#include "OtaServer.h"
 #include "Provisioner.h"
 
 namespace {
@@ -19,6 +20,8 @@ Provisioner provisioner;
 WiFiClientSecure tlsClient;
 MQTTClient mqtt(2048);
 WiFiUDP udp;
+OtaServer ota;
+bool otaStarted = false;
 
 String rootTopic;
 bool pcOnline = false;
@@ -293,6 +296,20 @@ void handlePendingCommand() {
   }
 }
 
+// Everything the desktop app needs to find this device and push firmware to it.
+// The OTA token rides along because every client on this broker is already
+// trusted with commands that can shut the PC down.
+void publishBotState() {
+  JsonDocument doc;
+  doc["status"] = "online";
+  doc["source"] = "esp32";
+  doc["version"] = BoardConfig::kFirmwareVersion;
+  doc["ip"] = WiFi.localIP().toString();
+  doc["otaToken"] = config.otaToken;
+  doc["timestamp"] = isoNow();
+  publishJson(topic("state/bot"), doc, true);
+}
+
 void connectMqtt(uint32_t now) {
   if (mqtt.connected() || now - lastMqttAttempt < BoardConfig::kReconnectMs) return;
   if (time(nullptr) < 1700000000) {
@@ -322,7 +339,7 @@ void connectMqtt(uint32_t now) {
   mqtt.subscribe(topic("state/volume"), 1);
   mqtt.subscribe(topic("telemetry/system"), 1);
   mqtt.subscribe(topic("event/alert"), 1);
-  mqtt.publish(topic("state/bot"), "{\"status\":\"online\",\"source\":\"esp32\"}", true, 1);
+  publishBotState();
   bot.setMood(BotMood::Happy);
 }
 
@@ -498,6 +515,19 @@ void setup() {
 
   configStore.load(config);
   rootTopic = "pcbot/v1/" + config.deviceId;
+  // Mint the OTA secret once, on first boot after an update or a factory reset.
+  if (config.otaToken.length() < BoardConfig::kOtaTokenBytes) {
+    String token;
+    for (uint32_t i = 0; i < BoardConfig::kOtaTokenBytes; ++i) {
+      char pair[3];
+      snprintf(pair, sizeof(pair), "%02x",
+               static_cast<unsigned>(esp_random() & 0xFF));
+      token += pair;
+    }
+    config.otaToken = token;
+    configStore.save(config);
+    Serial.println("[ota] generated a new update token");
+  }
   // MQTT timestamps stay UTC (they use gmtime); this only drives the clock.
   setenv("TZ", config.timezone.c_str(), 1);
   tzset();
@@ -556,6 +586,19 @@ void loop() {
     delay(2);
     return;
   }
+  // The update server only exists once the device is on the LAN.
+  if (!otaStarted) {
+    otaStarted = true;
+    ota.begin(config.otaToken, BoardConfig::kFirmwareVersion, config.deviceId,
+              [](uint8_t percent) { bot.setUpdateProgress(percent); });
+  }
+  ota.tick();
+  if (ota.active()) {
+    // Nothing else matters while firmware is being written.
+    delay(1);
+    return;
+  }
+
   connectMqtt(now);
   mqtt.loop();
   handlePendingCommand();

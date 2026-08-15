@@ -108,7 +108,10 @@ void valueText(char *out, size_t size, float value, const char *unit,
 } // namespace
 
 BotDisplay::BotDisplay()
-    : welcomeCanvas_(&display_), net_(&display_), card_(&display_) {
+    : welcomeCanvas_(&display_),
+      net_(&display_),
+      card_(&display_),
+      footer_(&display_) {
   for (uint8_t i = 0; i < kHistorySamples; ++i) {
     downHistory_[i] = kNoSample;
     upHistory_[i] = kNoSample;
@@ -206,17 +209,17 @@ void BotDisplay::setNetwork(float downloadMbps, float uploadMbps,
 void BotDisplay::setMedia(const String& status, const String& title,
                           const String& artist, const String& app,
                           float positionSeconds, float durationSeconds) {
-  const bool active = status == "playing" || status == "paused";
-  const bool changed = active != mediaActive_ || title != mediaTitle_;
-  mediaActive_ = active;
-  mediaPlaying_ = status == "playing";
+  const bool playing = status == "playing";
+  // Starting, stopping or changing track swaps what the summary slot shows, so
+  // it is worth waking the screen for; a position update is not.
+  const bool changed = playing != mediaPlaying_ || title != mediaTitle_;
+  mediaPlaying_ = playing;
   mediaTitle_ = title;
   mediaArtist_ = artist;
   mediaApp_ = app;
   mediaPosition_ = positionSeconds;
   mediaDuration_ = durationSeconds;
   mediaStamp_ = millis();
-  // A new track is worth waking the screen for; a position update is not.
   if (changed) noteActivity(mediaStamp_);
 }
 
@@ -229,6 +232,42 @@ void BotDisplay::setVolume(uint8_t level, bool muted) {
   const uint32_t now = millis();
   volumeOverlayUntil_ = now + BoardConfig::kVolumeOverlayMs;
   noteActivity(now);
+}
+
+void BotDisplay::setUpdateProgress(uint8_t percent) {
+  const bool first = !updating_;
+  updating_ = true;
+  updatePercent_ = percent > 100 ? 100 : percent;
+  if (first) display_.fillScreen(theme::kInk);
+
+  // Drawn straight from the setter: the upload handler owns the CPU while the
+  // flash is being written, so tick() does not run during a transfer.
+  const uint16_t background = theme::kInk;
+  const int16_t cardX = 16;
+  const int16_t cardY = 108;
+  const int16_t cardW = kScreenWidth - cardX * 2;
+  const int16_t cardH = 104;
+
+  theme::glassCard(display_, cardX, cardY, cardW, cardH, 14, background,
+                   theme::kPrimary, 0.45f);
+  display_.setTextDatum(TC_DATUM);
+  display_.setTextColor(theme::kTextSoft);
+  display_.drawString("UPDATING FIRMWARE", kScreenWidth / 2, cardY + 16, 2);
+
+  char text[8];
+  snprintf(text, sizeof(text), "%u%%", updatePercent_);
+  display_.setTextColor(theme::kText);
+  display_.drawString(text, kScreenWidth / 2, cardY + 38, 4);
+  display_.setTextDatum(TL_DATUM);
+
+  liquid::bar(display_, cardX + 14, cardY + cardH - 26, cardW - 28, 12,
+              updatePercent_ / 100.0f, millis(), theme::kPrimary,
+              theme::kTertiary, background);
+
+  display_.setTextDatum(TC_DATUM);
+  display_.setTextColor(theme::kMuted);
+  display_.drawString("Do not unplug the device", kScreenWidth / 2, cardY + cardH + 12, 1);
+  display_.setTextDatum(TL_DATUM);
 }
 
 float BotDisplay::mediaPositionAt(uint32_t now) const {
@@ -839,37 +878,41 @@ void BotDisplay::drawProvisioning() {
 }
 
 void BotDisplay::drawFooter(uint32_t now) {
+  // Rendered into a sprite and pushed in one write. Painting the gradient and
+  // then the text straight to the panel made the speaker icon and the hold hint
+  // flicker on every repaint.
   const uint16_t accent = shade(moodAccent());
-  theme::verticalGradient(display_, 0, kFooterY, kScreenWidth,
-                          kScreenHeight - kFooterY, shade(theme::kInk),
+  const int16_t height = kScreenHeight - kFooterY;
+  theme::verticalGradient(footer_, 0, 0, kScreenWidth, height, shade(theme::kInk),
                           shade(theme::kBackdrop));
 
   if (touchPressed_) {
-    liquid::bar(display_, kMargin, kFooterY + 4, kScreenWidth - kMargin * 2, 14,
+    liquid::bar(footer_, kMargin, 4, kScreenWidth - kMargin * 2, 14,
                 holdProgress_, now, shade(theme::kPrimary),
                 shade(theme::kTertiary), shade(theme::kInk));
+    footer_.pushSprite(0, kFooterY);
     return;
   }
 
   if (volumeKnown_) {
     // The knob's current position, so the level is readable without moving it.
     const uint8_t waves = volumeLevel_ >= 66 ? 3 : (volumeLevel_ >= 33 ? 2 : 1);
-    icons::speaker(display_, kMargin, kFooterY + 3, 12, shade(theme::kTextSoft),
+    icons::speaker(footer_, kMargin, 3, 12, shade(theme::kTextSoft),
                    shade(theme::kBevelDark), waves,
                    volumeMuted_ || volumeLevel_ == 0);
     char text[10];
     snprintf(text, sizeof(text), "%u%%", volumeLevel_);
-    display_.setTextColor(shade(theme::kTextSoft));
-    display_.drawString(text, kMargin + 24, kFooterY + 6, 1);
+    footer_.setTextColor(shade(theme::kTextSoft));
+    footer_.drawString(text, kMargin + 24, 6, 1);
   } else {
-    display_.setTextColor(shade(theme::kMuted));
-    display_.drawString(moodLabel(), kMargin, kFooterY + 6, 1);
+    footer_.setTextColor(shade(theme::kMuted));
+    footer_.drawString(moodLabel(), kMargin, 6, 1);
   }
-  display_.setTextDatum(TR_DATUM);
-  display_.setTextColor(theme::mix(shade(theme::kMuted), accent, 0.5f));
-  display_.drawString("HOLD 2s - PC POWER", kScreenWidth - kMargin,
-                      kFooterY + 6, 1);
-  display_.setTextDatum(TL_DATUM);
+  footer_.setTextDatum(TR_DATUM);
+  footer_.setTextColor(theme::mix(shade(theme::kMuted), accent, 0.5f));
+  footer_.drawString("HOLD 2s - PC POWER", kScreenWidth - kMargin, 6, 1);
+  footer_.setTextDatum(TL_DATUM);
+  footer_.pushSprite(0, kFooterY);
 }
 
 void BotDisplay::finishIntro() {
@@ -879,11 +922,15 @@ void BotDisplay::finishIntro() {
   // Dashboard sprites are allocated only after the intro canvas is released.
   net_.setColorDepth(16);
   card_.setColorDepth(16);
-  const bool ready = net_.createSprite(kTileWidth, kTileHeight) != nullptr &&
-                     card_.createSprite(kCardWidth, kCardHeight) != nullptr;
+  footer_.setColorDepth(16);
+  const bool ready =
+      net_.createSprite(kTileWidth, kTileHeight) != nullptr &&
+      card_.createSprite(kCardWidth, kCardHeight) != nullptr &&
+      footer_.createSprite(kScreenWidth, kScreenHeight - kFooterY) != nullptr;
   spritesReady_ = ready;
   net_.setTextDatum(TL_DATUM);
   card_.setTextDatum(TL_DATUM);
+  footer_.setTextDatum(TL_DATUM);
 
   display_.fillScreen(theme::kInk);
   if (!ready) {
@@ -956,6 +1003,9 @@ void BotDisplay::leaveClock() {
 }
 
 void BotDisplay::tick(uint32_t now) {
+  // The update screen is painted by setUpdateProgress and owns the panel until
+  // the device reboots into the new image.
+  if (updating_) return;
   const uint32_t interval = clockMode_ ? BoardConfig::kPowerSaverFrameMs
                                        : BoardConfig::kDisplayFrameMs;
   if (now - lastFrame_ < interval)
@@ -1002,9 +1052,9 @@ void BotDisplay::tick(uint32_t now) {
       drawProvisioning();
   } else if (now - lastCardFrame_ >= BoardConfig::kCardFrameMs) {
     lastCardFrame_ = now;
-    // The summary slot shows what is playing when there is something to show,
-    // and falls back to the network graph when there is not.
-    if (mediaActive_) {
+    // The now-playing card is for music that is actually playing. Paused or
+    // stopped hands the slot back to the network graph.
+    if (mediaPlaying_) {
       drawMedia(now);
     } else {
       drawNetwork(now);

@@ -38,6 +38,11 @@ public sealed class MediaVolumeAgent : IAsyncDisposable
     public int Volume { get; private set; }
     public bool Muted { get; private set; }
 
+    /// <summary>Device details learned from the retained state/bot message.</summary>
+    public string DeviceIp { get; private set; } = "";
+    public string DeviceVersion { get; private set; } = "";
+    public string OtaToken { get; private set; } = "";
+
     /// <summary>Raised on the worker thread whenever media or volume changes.</summary>
     public event Action? Updated;
 
@@ -106,6 +111,9 @@ public sealed class MediaVolumeAgent : IAsyncDisposable
 
         await client.ConnectAsync(mqttOptions, token);
         await client.SubscribeAsync(_topics.VolumeCommand, MqttQualityOfServiceLevel.AtMostOnce, token);
+        // Retained device state carries the LAN address and update token, so
+        // firmware updates need no manual IP entry.
+        await client.SubscribeAsync(_topics.BotState, MqttQualityOfServiceLevel.AtLeastOnce, token);
         _client = client;
 
         // Announce the current level immediately so the bot's knob and the
@@ -116,6 +124,28 @@ public sealed class MediaVolumeAgent : IAsyncDisposable
     private async Task OnMessageAsync(MqttApplicationMessageReceivedEventArgs args)
     {
         if (_topics is null || _volume is null) return;
+
+        if (string.Equals(args.ApplicationMessage.Topic, _topics.BotState, StringComparison.Ordinal))
+        {
+            try
+            {
+                var payload = Encoding.UTF8.GetString(args.ApplicationMessage.PayloadSegment);
+                using var document = JsonDocument.Parse(payload);
+                var root = document.RootElement;
+                DeviceIp = root.TryGetProperty("ip", out var ip) ? ip.GetString() ?? "" : "";
+                DeviceVersion = root.TryGetProperty("version", out var version)
+                    ? version.GetString() ?? "" : "";
+                OtaToken = root.TryGetProperty("otaToken", out var otaToken)
+                    ? otaToken.GetString() ?? "" : "";
+                Updated?.Invoke();
+            }
+            catch (JsonException)
+            {
+                // An older device publishes a plain status object; nothing to read.
+            }
+            return;
+        }
+
         if (!string.Equals(args.ApplicationMessage.Topic, _topics.VolumeCommand, StringComparison.Ordinal)) return;
 
         try

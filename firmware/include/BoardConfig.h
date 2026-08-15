@@ -10,6 +10,14 @@ constexpr char kProductName[] = "PICO";
 constexpr char kProductSuffix[] = "ASSISTANT";
 constexpr char kProductFullName[] = "Pico Assistant";
 constexpr char kSetupApPrefix[] = "PICO-";
+// Bump on every release. Published in state/bot so the desktop app can tell
+// whether an update actually took.
+constexpr char kFirmwareVersion[] = "1.5.0";
+
+// Over-the-air updates. The device serves an authenticated upload endpoint on
+// the LAN; the desktop app pushes a firmware.bin to it.
+constexpr uint16_t kOtaPort = 80;
+constexpr uint32_t kOtaTokenBytes = 16;
 
 // ILI9341 is configured through TFT_eSPI build flags in platformio.ini:
 // VCC=5V, LED=3V3, CS=10, RST=6, DC=7, MOSI=11, SCLK=12. GPIO13 is reserved

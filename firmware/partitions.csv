@@ -1,0 +1,15 @@
+# 4 MB flash, laid out for over-the-air updates.
+#
+# OTA needs two app slots: the running firmware writes the new image into the
+# inactive slot, then swaps on reboot. That is what makes a failed transfer
+# survivable — the old image stays intact until the new one is verified.
+#
+# 1.5 MB per slot leaves ~280 KB of headroom over the current 1.22 MB build.
+# The remaining 960 KB is a LittleFS partition for future assets.
+#
+# Name,     Type, SubType,  Offset,   Size,     Flags
+nvs,        data, nvs,      0x9000,   0x5000,
+otadata,    data, ota,      0xe000,   0x2000,
+app0,       app,  ota_0,    0x10000,  0x180000,
+app1,       app,  ota_1,    0x190000, 0x180000,
+littlefs,   data, spiffs,   0x310000, 0xF0000,

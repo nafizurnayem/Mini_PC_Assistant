@@ -119,6 +119,7 @@ public sealed class MqttTopics
     public string ResetCommand => $"{_root}/command/reset";
     public string VolumeCommand => $"{_root}/command/volume";
     public string PcState => $"{_root}/state/pc";
+    public string BotState => $"{_root}/state/bot";
     public string SpeedTestState => $"{_root}/state/speedtest";
     public string MediaState => $"{_root}/state/media";
     public string VolumeState => $"{_root}/state/volume";

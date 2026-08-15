@@ -44,6 +44,9 @@ class BotDisplay {
                 const String& app, float positionSeconds, float durationSeconds);
   // PC master volume. Shown as an overlay while it is moving.
   void setVolume(uint8_t level, bool muted);
+  // Firmware upload progress, 0-100. Takes over the whole screen: nothing else
+  // is worth showing while the flash is being rewritten.
+  void setUpdateProgress(uint8_t percent);
   void setProvisioningInfo(const String& ssid, const String& password,
                            const String& url);
   // Live touch state so the interface reacts on the same frame the finger
@@ -96,6 +99,7 @@ class BotDisplay {
   TFT_eSprite welcomeCanvas_;  // Freed once the intro finishes.
   TFT_eSprite net_;            // Full-width network activity graph.
   TFT_eSprite card_;           // Reused for each metric card.
+  TFT_eSprite footer_;         // Hint strip, pushed whole so it cannot flicker.
   WelcomeAnimation welcome_;
   ClockScreen clock_;
 
@@ -115,7 +119,6 @@ class BotDisplay {
   String mediaTitle_;
   String mediaArtist_;
   String mediaApp_;
-  bool mediaActive_ = false;
   bool mediaPlaying_ = false;
   float mediaPosition_ = NAN;
   float mediaDuration_ = NAN;
@@ -125,6 +128,8 @@ class BotDisplay {
   bool volumeMuted_ = false;
   bool volumeKnown_ = false;
   uint32_t volumeOverlayUntil_ = 0;
+  bool updating_ = false;
+  uint8_t updatePercent_ = 0;
 
   int16_t rssiDbm_ = 0;
   // Decaying peak throughput, so the trend stays meaningful on any connection

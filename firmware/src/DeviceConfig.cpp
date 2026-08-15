@@ -19,6 +19,7 @@ bool ConfigStore::load(DeviceConfig& config) {
   config.broadcastIp = prefs.getString("broadcast", "255.255.255.255");
   config.rootCa = prefs.getString("rootCa", "");
   config.timezone = prefs.getString("tz", "UTC0");
+  config.otaToken = prefs.getString("otaToken", "");
   prefs.end();
   return config.ready();
 }
@@ -36,6 +37,7 @@ bool ConfigStore::save(const DeviceConfig& config) {
   prefs.putString("broadcast", config.broadcastIp);
   prefs.putString("rootCa", config.rootCa);
   prefs.putString("tz", config.timezone);
+  prefs.putString("otaToken", config.otaToken);
   prefs.end();
   return true;
 }
