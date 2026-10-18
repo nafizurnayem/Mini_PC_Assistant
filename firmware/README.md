@@ -205,6 +205,42 @@ If the pad does nothing, check these in order:
 
 ## Configure Wi-Fi from a phone or PC
 
+### Wi-Fi password changed / bot offline (firmware 1.6)
+
+After **60 seconds continuously disconnected from Wi-Fi**, the bot opens its
+protected setup hotspot and BLE setup automatically. Existing settings are
+kept. A **five-second touch hold while offline** opens setup immediately;
+the normal two-second PC power gesture still applies when connected to MQTT.
+The gesture type is fixed when the touch begins so a reconnect during a
+recovery hold cannot shut down the PC.
+
+Join the displayed `PICO-xxxxxx` hotspot, then open `http://192.168.4.1`.
+The page defaults to **Change Wi-Fi only** when cloud/PC settings are already
+saved. Enter your home SSID and new password, save, and reconnect your phone
+or PC to your home network. Cloud credentials, CA, device identity, PC MAC,
+time zone and firmware update token stay unchanged.
+
+Setup mode stays open until you save or restart the bot. If this was only a
+temporary router outage, you may restart the bot after the router recovers;
+automatic recovery did not erase the old credentials. A router outage does
+not cause a factory reset.
+
+**Already stuck on older firmware?** Hold the touch pad while powering on and
+keep holding for five seconds. That existing gesture clears only Wi-Fi and
+opens the setup hotspot. Use the browser portal to recover before updating,
+or flash the new firmware over USB; an offline bot cannot receive a cloud/OTA
+reset or update.
+
+Android: use the Wi-Fi icon in the app's top bar or **Settings → Bot Wi-Fi
+setup / offline recovery**. Open phone Wi-Fi settings and the browser portal,
+or use Wi-Fi-only Bluetooth setup after selecting your bot. No MQTT connection
+is needed. Linux: use **Bot Wi-Fi setup** on the Dashboard or its tab.
+
+Firmware source is `src/main.cpp` with Arduino `setup()` and `loop()` under
+PlatformIO; this repository has no separate `.ino` sketch to keep in sync.
+
+### First-time setup
+
 When Pico Assistant has no valid configuration, it starts a temporary WPA2
 setup hotspot and also advertises the existing encrypted BLE service. BLE
 advertises as `Pico Assistant <deviceId>`.
@@ -230,7 +266,38 @@ If incorrect Wi-Fi or MQTT settings leave the device offline, hold the TTP223
 while powering it and keep holding for five seconds. This clears only Wi-Fi,
 preserves MQTT/device settings, and reopens the browser setup hotspot.
 
+The local `POST /api/wifi` endpoint accepts just `wifiSsid` and `wifiPassword`
+as form fields; it is available only in setup mode. BLE also accepts a JSON
+object containing only those two fields. Invalid submissions are staged and
+rejected before replacing the current in-memory configuration.
+
 ## Build and upload
+
+Linux uses the same PlatformIO commands below (`python3` if that is your Python
+command). Install PlatformIO in a Python virtual environment. Use a Linux
+PlatformIO core directory when switching from a Windows checkout so cached
+Windows compiler executables are not reused, for example:
+
+```bash
+export PLATFORMIO_CORE_DIR="$HOME/.platformio-linux"
+python3 -m platformio run -d firmware
+python3 -m platformio run -d firmware -t upload
+```
+
+The built app image is
+`firmware/.pio/build/pcbot-esp32-s3-n4r2/firmware.bin`.
+For an offline bot, connect it over USB and use the upload command. Do not
+erase flash: a normal upload preserves NVS configuration. The app-only binary
+is also suitable for the existing authenticated OTA updater once the bot has
+been recovered onto your LAN; it is not a merged full-flash image.
+
+The recovery timer has a host-side behavior test, including interrupted
+outages and clock rollover:
+
+```bash
+g++ -std=c++11 tests/wifi-recovery.cpp -o /tmp/wifi-recovery-test
+/tmp/wifi-recovery-test
+```
 
 From the repository root:
 

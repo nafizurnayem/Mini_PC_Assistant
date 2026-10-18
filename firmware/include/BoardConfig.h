@@ -12,7 +12,7 @@ constexpr char kProductFullName[] = "Pico Assistant";
 constexpr char kSetupApPrefix[] = "PICO-";
 // Bump on every release. Published in state/bot so the desktop app can tell
 // whether an update actually took.
-constexpr char kFirmwareVersion[] = "1.5.0";
+constexpr char kFirmwareVersion[] = "1.6.0";
 
 // Over-the-air updates. The device serves an authenticated upload endpoint on
 // the LAN; the desktop app pushes a firmware.bin to it.
@@ -60,6 +60,8 @@ constexpr uint32_t kIdleSleepMs = 60000;
 constexpr uint32_t kTelemetryLostMs = 30000;
 constexpr uint32_t kReconnectMs = 5000;
 constexpr uint32_t kWifiRetryMs = 15000;
+constexpr uint32_t kWifiSetupAfterMs = 60000;
+constexpr uint32_t kWifiSetupHoldMs = 5000;
 constexpr uint32_t kDisplayFrameMs = 25;
 // The telemetry cards push about 85 KB per pass, so they animate on their own
 // slower cadence while the rest of the interface keeps the 25 ms budget.
@@ -80,4 +82,5 @@ constexpr bool kUse24HourClock = false;
 constexpr char kBleServiceUuid[] = "b7a70001-ec76-4b4f-9a06-8b865ce25170";
 constexpr char kBleConfigUuid[] = "b7a70002-ec76-4b4f-9a06-8b865ce25170";
 constexpr char kBleStatusUuid[] = "b7a70003-ec76-4b4f-9a06-8b865ce25170";
+constexpr char kBleInfoUuid[] = "b7a70004-ec76-4b4f-9a06-8b865ce25170";
 }

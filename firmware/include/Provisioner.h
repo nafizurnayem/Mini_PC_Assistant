@@ -23,6 +23,8 @@ class Provisioner {
   void handleConfig();
   void handleScan();
   void handleSave();
+  void handleWifiSave();
+  bool wifiOnlyAvailable() const;
   void redirectToPortal();
 
   DeviceConfig* config_ = nullptr;

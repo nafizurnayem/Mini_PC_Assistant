@@ -28,5 +28,6 @@ Acknowledgement:
 ```
 
 Consumers reject expired commands and remember recent `commandId` values.
-An `off` command is only handled by Windows agent. ESP32 never cuts power.
-
+An `off` command is only handled by the active PC agent (Windows or Linux).
+ESP32 never cuts power. Linux acknowledgements use source `linux-agent`;
+the topics and command envelope are shared with Windows.

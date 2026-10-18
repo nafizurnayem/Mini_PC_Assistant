@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -11,6 +11,8 @@ for (const topic of requiredTopics) {
 
 const requiredFiles = [
   'firmware/platformio.ini',
+  'firmware/boards/pcbot-esp32-s3-n4r2.json',
+  'linux/install.sh',
   'windows/PcBot.sln',
   'mobile/pubspec.yaml',
   'home-assistant/compose.yaml',
@@ -21,4 +23,3 @@ for (const file of requiredFiles) {
 }
 
 console.log(`Contract v${contract.version}: ${Object.keys(contract.topics).length} topics valid`);
-

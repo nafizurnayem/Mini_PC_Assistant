@@ -43,14 +43,9 @@ dotnet run --project .\tests\PcBot.Tests\PcBot.Tests.csproj -c Release
 .\publish.ps1
 ```
 
-> The service locks its own DLLs while running, so `publish.ps1` fails with
-> `MSB3027 ... locked by PC Assistant Bot` if the service is up. Stop it first
-> from an elevated terminal (`Stop-Service PcBot`), publish, then start it
-> again. Publishing only the desktop app never needs this:
->
-> ```powershell
-> dotnet publish .\src\PcBot.Tray\PcBot.Tray.csproj -c Release -r win-x64 --self-contained true -o .\publish\tray
-> ```
+`publish.ps1` stops the running service and desktop app before publishing, then
+restarts whichever was running. Run it from an elevated PowerShell if the
+service is active. Use `-NoStop` only when you have stopped both yourself.
 
 Install the Ookla Speedtest CLI and set its executable path on the Monitoring
 page. Run `install-service.ps1` from an elevated PowerShell terminal to publish

@@ -19,7 +19,7 @@ and 45°**, with soft detents every 15°.
 ## Files
 
 ```
-pico-case/
+case/
 ├─ PicoAssistantCase/
 │  ├─ PicoAssistantCase.py    ← run this in Fusion 360
 │  └─ PicoAssistantCase.manifest
@@ -174,7 +174,7 @@ stays 36 mm inside the rear edge at 45°.
 
 ## Source geometry
 
-Display dimensions were extracted from `../3-2-tft-spi-240x320-v1-0-1.snapshot.1/320x240.step`:
+Display dimensions were extracted from `../reference/display.step`:
 
 ```
 PCB            89.30 × 55.04 × 1.60 mm

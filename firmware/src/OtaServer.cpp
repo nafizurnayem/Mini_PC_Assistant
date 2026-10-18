@@ -36,6 +36,13 @@ void OtaServer::tick() {
   if (started_) server_.handleClient();
 }
 
+void OtaServer::stop() {
+  if (uploading_) Update.abort();
+  uploading_ = false;
+  if (started_) server_.stop();
+  started_ = false;
+}
+
 bool OtaServer::authorised() {
   // Constant-time-ish comparison is overkill for a LAN token, but rejecting a
   // missing or short token explicitly is not.

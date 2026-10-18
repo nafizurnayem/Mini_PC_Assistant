@@ -14,6 +14,40 @@ class AppController extends ChangeNotifier {
   final MqttService _mqtt;
   StreamSubscription? _messages;
   StreamSubscription? _connection;
+  Timer? _telemetryTimer;
+  String? _pendingTelemetry;
+  bool _foreground = true;
+
+  void setForeground(bool foreground) {
+    if (_foreground == foreground) return;
+    _foreground = foreground;
+    _mqtt.setTelemetryEnabled(foreground);
+    if (!foreground) {
+      _telemetryTimer?.cancel();
+      _telemetryTimer = null;
+      _pendingTelemetry = null;
+    }
+  }
+
+  void _queueTelemetry(String payload) {
+    if (!_foreground) return;
+    _pendingTelemetry = payload;
+    // Parse and repaint at most once a second, even after broker bursts.
+    _telemetryTimer ??= Timer(const Duration(seconds: 1), () {
+      _telemetryTimer = null;
+      final payload = _pendingTelemetry;
+      _pendingTelemetry = null;
+      if (payload == null) return;
+      try {
+        telemetry = Telemetry.fromPayload(payload);
+        history.insert(0, telemetry!);
+        if (history.length > 60) history.removeLast();
+      } catch (exception) {
+        error = 'Invalid broker message: $exception';
+      }
+      notifyListeners();
+    });
+  }
 
   AppSettings settings = const AppSettings();
   Telemetry? telemetry;
@@ -67,14 +101,15 @@ class AppController extends ChangeNotifier {
         final json = jsonDecode(message.payload) as Map<String, dynamic>;
         botOnline = json['status'] == 'online';
       } else if (message.topic.endsWith('/telemetry/system')) {
-        telemetry = Telemetry.fromPayload(message.payload);
-        history.insert(0, telemetry!);
-        if (history.length > 60) history.removeLast();
+        _queueTelemetry(message.payload);
+        return;
       } else if (message.topic.endsWith('/state/speedtest')) {
         speedResult = SpeedResult.fromPayload(message.payload);
       } else if (message.topic.endsWith('/event/alert')) {
         alerts.insert(0, jsonDecode(message.payload) as Map<String, dynamic>);
         if (alerts.length > 50) alerts.removeLast();
+      } else {
+        return;
       }
       notifyListeners();
     } catch (exception) {
@@ -85,6 +120,7 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _telemetryTimer?.cancel();
     _messages?.cancel();
     _connection?.cancel();
     _mqtt.dispose();

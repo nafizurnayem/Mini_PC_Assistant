@@ -1,7 +1,7 @@
 name: pc_bot
 description: PC Assistant Bot controller and dashboard.
 publish_to: none
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -14,7 +14,6 @@ dependencies:
   mqtt_client: ^10.8.0
   permission_handler: ^12.0.3
   provider: ^6.1.2
-  shared_preferences: ^2.3.3
   uuid: ^4.5.1
 
 dev_dependencies:

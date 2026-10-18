@@ -17,15 +17,15 @@ constexpr int16_t kHeaderHeight = 32;
 
 constexpr int16_t kTileY = 36;
 constexpr int16_t kTileWidth = 224;
-constexpr int16_t kTileHeight = 96;
+constexpr int16_t kTileHeight = 68;
 
 constexpr int16_t kCardWidth = 224;
-constexpr int16_t kCardHeight = 50;
-constexpr int16_t kCardFirstY = 138;
-constexpr int16_t kCardSpacing = 54;
+constexpr int16_t kCardHeight = 58;
+constexpr int16_t kCardFirstY = 110;
+constexpr int16_t kCardSpacing = 64;
 // The volume overlay borrows the metric card sprite and lands over the middle
 // card, which is the least useful thing to cover for a moment.
-constexpr int16_t kVolumeOverlayY = 192;
+constexpr int16_t kVolumeOverlayY = kCardFirstY + kCardSpacing;
 
 constexpr int16_t kFooterY = 300;
 
@@ -156,16 +156,27 @@ void BotDisplay::setMood(BotMood mood, const String &message) {
   noteActivity(now);
 }
 
-void BotDisplay::setMetrics(float cpuTemp, float gpuTemp, float memoryPercent) {
+void BotDisplay::setMetrics(float cpuTemp, float cpuLoad, float gpuTemp,
+                            float gpuLoad, float memoryPercent,
+                            float diskPercent) {
   cpu_.target = cpuTemp;
+  cpuLoad_.target = cpuLoad;
   gpu_.target = gpuTemp;
+  gpuLoad_.target = gpuLoad;
   memory_.target = memoryPercent;
+  disk_.target = diskPercent;
+  if (isnan(disk_.shown))
+    disk_.shown = diskPercent;
   // Seed the animation on the first reading so values do not sweep up from
   // zero every time the PC reconnects.
   if (isnan(cpu_.shown))
     cpu_.shown = cpuTemp;
+  if (isnan(cpuLoad_.shown))
+    cpuLoad_.shown = cpuLoad;
   if (isnan(gpu_.shown))
     gpu_.shown = gpuTemp;
+  if (isnan(gpuLoad_.shown))
+    gpuLoad_.shown = gpuLoad;
   if (isnan(memory_.shown))
     memory_.shown = memoryPercent;
 }
@@ -421,9 +432,16 @@ void BotDisplay::updateValues() {
     cpu_.shown = approach(cpu_.shown, cpu_.target, 0.9f);
   if (!isnan(gpu_.target))
     gpu_.shown = approach(gpu_.shown, gpu_.target, 0.9f);
+  // Load swings much faster than temperature, so it catches up faster too.
+  if (!isnan(cpuLoad_.target))
+    cpuLoad_.shown = approach(cpuLoad_.shown, cpuLoad_.target, 3.0f);
+  if (!isnan(gpuLoad_.target))
+    gpuLoad_.shown = approach(gpuLoad_.shown, gpuLoad_.target, 3.0f);
   if (!isnan(memory_.target)) {
     memory_.shown = approach(memory_.shown, memory_.target, 1.4f);
   }
+  if (!isnan(disk_.target))
+    disk_.shown = approach(disk_.shown, disk_.target, 1.4f);
   if (!isnan(download_.target)) {
     download_.shown =
         approach(download_.shown, download_.target, throughputPeak_ * 0.04f);
@@ -457,7 +475,7 @@ void BotDisplay::drawHeader(uint32_t now) {
       display_, pillX, 6, pillWidth, 20,
       shade(mood_ == BotMood::Happy ? theme::kSuccess : theme::kPrimary),
       shade(mood_ == BotMood::Happy ? theme::kTertiary : theme::kSecondary));
-  icons::link(display_, pillX + 6, 9, 13, shade(theme::kWhite),
+  icons::link(display_, pillX + 13, 16, 13, shade(theme::kWhite),
               theme::mix(accent, theme::kInk, 0.55f),
               mood_ == BotMood::Disconnected ? 1 : 3);
   display_.setTextColor(shade(theme::kWhite));
@@ -556,96 +574,77 @@ void BotDisplay::drawNetwork(uint32_t now) {
   theme::glassCard(net_, 0, 0, kTileWidth, kTileHeight, 14, background,
                    shade(theme::kTertiary), 0.35f);
 
-  // ── Header row ─────────────────────────────────────────────────────────
-  const uint8_t  bars     = signalBars();
-  const uint16_t linkTone = bars == 0 ? shade(theme::kDanger)
-                          : bars == 1 ? shade(theme::kWarning)
-                                      : shade(theme::kTertiary);
+  const uint8_t bars = signalBars();
+  const uint16_t linkTone =
+      bars == 0 ? shade(theme::kDanger)
+                : (bars == 1 ? shade(theme::kWarning) : shade(theme::kTertiary));
+  const uint16_t downColor = shade(theme::kTertiary);
+  const uint16_t upColor = shade(theme::kSecondary);
 
-  icons::link(net_, 10, 6, 14, linkTone,
-              theme::mix(background, linkTone, 0.25f), bars);
+  icons::link(net_, 17, 12, 13, linkTone, theme::mix(background, linkTone, 0.25f),
+              bars);
   net_.setTextColor(shade(theme::kTextSoft));
-  net_.drawString("NETWORK ACTIVITY", 30, 8, 1);
+  net_.drawString("NETWORK", 28, 7, 1);
 
   char text[20];
   net_.setTextDatum(TR_DATUM);
   net_.setTextColor(linkTone);
   if (rssiDbm_ == 0) {
-    net_.drawString("NO LINK", kTileWidth - 10, 8, 1);
+    net_.drawString("NO LINK", kTileWidth - 10, 7, 1);
   } else {
     snprintf(text, sizeof(text), "%d dBm", rssiDbm_);
-    net_.drawString(text, kTileWidth - 10, 8, 1);
+    net_.drawString(text, kTileWidth - 10, 7, 1);
   }
   net_.setTextDatum(TL_DATUM);
 
-  // ── Two-panel layout ────────────────────────────────────────────────────
-  // Each panel: label+value row (8 px) + plot area (25 px).
-  // Total: header(20) + sep(1) + DOWN(34) + sep(1) + UP(34) + pad(6) = 96
-  const int16_t plotX  = 10;
-  const int16_t plotW  = kTileWidth - 20;
-  const int16_t sepY   = 20;   // below header
-  const int16_t midY   = 55;   // between DOWN and UP panels
+  // One plot carrying both directions: download as a filled area, upload as a
+  // line over it. Two stacked panels do not fit once the metric cards need
+  // room for their second bar.
+  const int16_t plotX = 10;
+  const int16_t plotY = 19;
+  const int16_t plotW = kTileWidth - 20;
+  const int16_t plotH = 28;
 
-  const int16_t dLabelY = 22;
-  const int16_t dPlotY  = 30;
-  const int16_t dPlotH  = midY - dPlotY - 1;  // 24 px
-
-  const int16_t uLabelY = 57;
-  const int16_t uPlotY  = 65;
-  const int16_t uPlotH  = kTileHeight - uPlotY - 5;  // 26 px
-
-  const uint16_t downColor = shade(theme::kTertiary);
-  const uint16_t upColor   = shade(theme::kSecondary);
-
-  // Divider lines.
-  const uint16_t divColor = theme::mix(background, theme::kBevelLight, 0.18f);
-  net_.drawFastHLine(8, sepY, kTileWidth - 16, divColor);
-  net_.drawFastHLine(8, midY, kTileWidth - 16, divColor);
-
-  // Subtle grid lines inside each panel.
-  const uint16_t gridColor = theme::mix(background, theme::kBevelLight, 0.09f);
-  for (uint8_t g = 1; g < 3; ++g) {
-    net_.drawFastHLine(plotX, dPlotY + dPlotH * g / 3, plotW, gridColor);
-    net_.drawFastHLine(plotX, uPlotY + uPlotH * g / 3, plotW, gridColor);
+  for (uint8_t line = 1; line < 3; ++line) {
+    net_.drawFastHLine(plotX, plotY + plotH - plotH * line / 3, plotW,
+                       theme::mix(background, theme::kBevelLight, 0.12f));
   }
-
-  // ── DOWN panel label + live reading ─────────────────────────────────────
-  net_.setTextColor(shade(theme::kMuted));
-  net_.drawString("DOWN", plotX, dLabelY, 1);
   net_.setTextDatum(TR_DATUM);
-  net_.setTextColor(downColor);
-  if (isnan(download_.shown)) {
-    net_.drawString("--", kTileWidth - 10, dLabelY, 1);
-  } else {
-    snprintf(text, sizeof(text), "%.1f Mb/s", download_.shown);
-    net_.drawString(text, kTileWidth - 10, dLabelY, 1);
-  }
-  net_.setTextDatum(TL_DATUM);
-
-  // ── UP panel label + live reading ───────────────────────────────────────
   net_.setTextColor(shade(theme::kMuted));
-  net_.drawString("UP", plotX, uLabelY, 1);
-  net_.setTextDatum(TR_DATUM);
-  net_.setTextColor(upColor);
-  if (isnan(upload_.shown)) {
-    net_.drawString("--", kTileWidth - 10, uLabelY, 1);
-  } else {
-    snprintf(text, sizeof(text), "%.1f Mb/s", upload_.shown);
-    net_.drawString(text, kTileWidth - 10, uLabelY, 1);
-  }
+  snprintf(text, sizeof(text), "%.0fMb", throughputPeak_);
+  net_.drawString(text, kTileWidth - 12, plotY, 1);
   net_.setTextDatum(TL_DATUM);
 
-  // ── Graphs ───────────────────────────────────────────────────────────────
   if (historyCount_ == 0) {
     net_.setTextDatum(MC_DATUM);
     net_.setTextColor(shade(theme::kMuted));
-    net_.drawString("WAITING FOR TELEMETRY", kTileWidth / 2,
-                    dPlotY + dPlotH / 2, 1);
+    net_.drawString("WAITING FOR TELEMETRY", kTileWidth / 2, plotY + plotH / 2,
+                    1);
     net_.setTextDatum(TL_DATUM);
   } else {
-    drawTrace(downHistory_, plotX, dPlotY, plotW, dPlotH, downColor, true, now);
-    drawTrace(upHistory_,   plotX, uPlotY, plotW, uPlotH, upColor,   true, now);
+    drawTrace(downHistory_, plotX, plotY, plotW, plotH, downColor, true, now);
+    drawTrace(upHistory_, plotX, plotY, plotW, plotH, upColor, false, now);
   }
+
+  // Legend doubles as the live reading for each direction.
+  const int16_t legendY = kTileHeight - 15;
+  net_.fillCircle(plotX + 3, legendY + 4, 3, downColor);
+  net_.setTextColor(shade(theme::kTextSoft));
+  if (isnan(download_.shown)) {
+    snprintf(text, sizeof(text), "DOWN --");
+  } else {
+    snprintf(text, sizeof(text), "DOWN %.1f Mb", download_.shown);
+  }
+  net_.drawString(text, plotX + 10, legendY, 1);
+
+  const int16_t upX = plotX + plotW / 2 + 10;
+  net_.fillCircle(upX - 7, legendY + 4, 3, upColor);
+  if (isnan(upload_.shown)) {
+    snprintf(text, sizeof(text), "UP --");
+  } else {
+    snprintf(text, sizeof(text), "UP %.1f Mb", upload_.shown);
+  }
+  net_.drawString(text, upX, legendY, 1);
 
   theme::sheenSweep(net_, 1, 1, kTileWidth - 2, kTileHeight - 2,
                     static_cast<float>(now % 7000) / 7000.0f * 1.4f - 0.2f,
@@ -660,11 +659,11 @@ void BotDisplay::drawMedia(uint32_t now) {
   theme::glassCard(net_, 0, 0, kTileWidth, kTileHeight, 14, background, accent,
                    0.35f);
 
-  icons::note(net_, 10, 6, 13, shade(theme::kText), accent);
+  icons::note(net_, 17, 13, 13, shade(theme::kText), accent);
   net_.setTextColor(shade(theme::kTextSoft));
   net_.drawString(mediaApp_.isEmpty() ? "NOW PLAYING" : mediaApp_, 30, 8, 1);
 
-  icons::transport(net_, kTileWidth - 20, 6, 11, accent, mediaPlaying_);
+  icons::transport(net_, kTileWidth - 15, 12, 11, accent, mediaPlaying_);
   net_.setTextDatum(TR_DATUM);
   net_.setTextColor(accent);
   net_.drawString(mediaPlaying_ ? "PLAYING" : "PAUSED", kTileWidth - 26, 8, 1);
@@ -732,7 +731,7 @@ void BotDisplay::drawVolumeOverlay(uint32_t now) {
   theme::glassCard(card_, 0, 0, kCardWidth, kCardHeight, 14, background, accent,
                    0.55f);
 
-  icons::speaker(card_, 12, 15, 20, shade(theme::kText),
+  icons::speaker(card_, 22, 25, 20, shade(theme::kText),
                  theme::mix(background, accent, 0.30f), waves,
                  volumeMuted_ || volumeLevel_ == 0);
 
@@ -755,99 +754,129 @@ void BotDisplay::drawVolumeOverlay(uint32_t now) {
   card_.pushSprite(kMargin, kVolumeOverlayY);
 }
 
-void BotDisplay::drawMetricCard(uint8_t index, int16_t y, const char *label,
-                                const Metric &metric, const char *unit,
-                                uint16_t calm, bool temperature, uint32_t now,
-                                bool unitPrefix) {
+void BotDisplay::drawStatRow(int16_t y, const char *caption, float value,
+                             const char *unit, float ratio, uint16_t calm,
+                             uint16_t tone, uint32_t now) {
   const uint16_t background = shade(theme::kInk);
-  // Temperatures use the thermal dial's scale so the card and the gauge above
-  // it never disagree about what "hot" means.
+  card_.setTextColor(shade(theme::kMuted));
+  card_.drawString(caption, 48, y + 1, 1);
+
+  char text[10];
+  if (isnan(value)) {
+    snprintf(text, sizeof(text), "--");
+  } else {
+    snprintf(text, sizeof(text), "%.0f%s", value, unit);
+  }
+  card_.setTextColor(shade(theme::kTextSoft));
+  card_.drawString(text, 84, y + 1, 1);
+
+  liquid::bar(card_, 122, y, kCardWidth - 134, 10, ratio, now, shade(calm), tone,
+              background);
+}
+
+void BotDisplay::drawMetricCard(uint8_t index, int16_t y, const char *label,
+                                const Metric &metric, const Metric &load,
+                                uint16_t calm, bool temperature, uint32_t now) {
+  const uint16_t background = shade(theme::kInk);
+  // Temperatures use the thermal scale so a card and the alert thresholds never
+  // disagree about what "hot" means; everything else is a plain percentage.
   const float ratio =
       temperature ? tempRatio(metric.shown) : ratioOf(metric.shown);
   const uint16_t tone = shade(temperature ? tempColor(metric.shown, calm)
                                           : statusColor(ratio, calm));
+  const float loadRatio = ratioOf(load.shown);
+  const uint16_t loadTone = shade(statusColor(loadRatio, calm));
 
   card_.fillSprite(background);
   theme::glassCard(card_, 0, 0, kCardWidth, kCardHeight, 14, background, tone,
                    0.30f);
 
-  // Icon tile carries the component's own accent, which is what links each row
-  // to its arc on the thermal dial.
-  theme::gradientPill(card_, 8, 10, 32, 32, shade(calm),
-                      theme::mix(shade(calm), shade(theme::kTertiary), 0.55f));
+  // Icon tile carries the component's own accent, linking the row to its
+  // colour everywhere else on the screen. The glow underneath lifts it off the
+  // card the way the status pill sits off the header.
+  constexpr int16_t kTileSize = 32;
+  constexpr int16_t kTileX = 8;
+  constexpr int16_t kTileY2 = (kCardHeight - kTileSize) / 2;
+  const int16_t glyphX = kTileX + kTileSize / 2;
+  const int16_t glyphY = kTileY2 + kTileSize / 2;
+
+  theme::glow(card_, kTileX, kTileY2, kTileSize, kTileSize, 10, shade(calm),
+              background, 2);
+  theme::gradientPill(card_, kTileX, kTileY2, kTileSize, kTileSize, shade(calm),
+                      theme::mix(shade(calm), shade(theme::kSecondary), 0.65f));
+  // Inner rim: a lit top edge and a dark base, so the tile reads as a raised
+  // key rather than a flat swatch.
+  card_.drawRoundRect(kTileX, kTileY2, kTileSize, kTileSize, kTileSize / 2,
+                      theme::lighten(shade(calm), 0.35f));
+  card_.drawFastHLine(kTileX + 8, kTileY2 + kTileSize - 1, kTileSize - 16,
+                      theme::darken(shade(calm), 0.45f));
+
   const uint16_t glyph = shade(theme::kWhite);
+  const uint16_t detail = theme::lighten(shade(theme::kTertiary), 0.25f);
   if (index == 0) {
-    icons::cpu(card_, 16, 18, 16, glyph, shade(theme::kTertiary));
+    icons::cpu(card_, glyphX, glyphY, 18, glyph, detail);
   } else if (index == 1) {
-    icons::gpu(card_, 16, 18, 16, glyph, shade(theme::kTertiary));
+    icons::gpu(card_, glyphX, glyphY, 18, glyph, detail);
   } else {
-    icons::memory(card_, 16, 18, 16, glyph, shade(theme::kTertiary));
+    icons::memory(card_, glyphX, glyphY, 18, glyph, detail);
   }
 
-  // Label and value share the top line; the bar owns the bottom one. Font 4 is
-  // 26 px tall, so the value must clear y=30 before the bar starts.
   card_.setTextColor(shade(theme::kTextSoft));
-  card_.drawString(label, 48, 11, 1);
+  card_.drawString(label, 48, 6, 1);
 
+  // Headline: the reading that raises an alert, right-aligned in font 4.
   char numStr[8];
   card_.setTextColor(tone);
   if (isnan(metric.shown)) {
     card_.setTextDatum(TR_DATUM);
-    card_.drawString("--", kCardWidth - 12, 4, 4);
+    card_.drawString("--", kCardWidth - 12, 2, 4);
     card_.setTextDatum(TL_DATUM);
   } else if (temperature) {
-    // Draw <number> + hand-drawn ° circle + C, right-aligned.
-    // Built-in TFT_eSPI fonts don't include the degree glyph so we
-    // paint a small circle ourselves between the digits and the "C".
+    // The built-in fonts have no degree glyph, so it is drawn as a small ring
+    // between the digits and the C.
     snprintf(numStr, sizeof(numStr), "%.0f", metric.shown);
-    const int16_t numW   = card_.textWidth(numStr, 4);
-    const int16_t cW     = card_.textWidth("C", 4);
-    const int16_t totalW = numW + 10 + cW;  // 10 = circle gap
-    const int16_t startX = kCardWidth - 12 - totalW;
+    const int16_t numW = card_.textWidth(numStr, 4);
+    const int16_t cW = card_.textWidth("C", 4);
+    const int16_t startX = kCardWidth - 12 - (numW + 10 + cW);
     card_.setTextDatum(TL_DATUM);
-    card_.drawString(numStr, startX, 4, 4);
-    card_.drawCircle(startX + numW + 5, 7, 3, tone);  // ° dot
-    card_.drawString("C", startX + numW + 10, 4, 4);
-  } else if (unitPrefix) {
-    // Draw large number in font 4 + small "%" in font 2, right-aligned.
-    // Font 4 is 26 px tall (y=4..30), font 2 is 16 px tall.
-    // Align baselines: y_pct = 30 - 16 = 14.
-    snprintf(numStr, sizeof(numStr), "%.0f", metric.shown);
-    const int16_t numW   = card_.textWidth(numStr, 4);
-    const int16_t pctW   = card_.textWidth("%", 2);
-    const int16_t totalW = numW + 2 + pctW;
-    const int16_t startX = kCardWidth - 12 - totalW;
-    card_.setTextDatum(TL_DATUM);
-    card_.drawString(numStr, startX, 4, 4);
-    card_.drawString("%", startX + numW + 2, 14, 2);
+    card_.drawString(numStr, startX, 2, 4);
+    card_.drawCircle(startX + numW + 5, 5, 3, tone);
+    card_.drawString("C", startX + numW + 10, 2, 4);
   } else {
-    char text[12];
-    snprintf(text, sizeof(text), "%.0f%s", metric.shown, unit);
-    card_.setTextDatum(TR_DATUM);
-    card_.drawString(text, kCardWidth - 12, 4, 4);
+    snprintf(numStr, sizeof(numStr), "%.0f", metric.shown);
+    const int16_t numW = card_.textWidth(numStr, 4);
+    const int16_t pctW = card_.textWidth("%", 2);
+    const int16_t startX = kCardWidth - 12 - (numW + 2 + pctW);
     card_.setTextDatum(TL_DATUM);
+    card_.drawString(numStr, startX, 2, 4);
+    card_.drawString("%", startX + numW + 2, 12, 2);
   }
 
-  liquid::bar(card_, 48, 34, kCardWidth - 60, 12, ratio, now, shade(calm), tone,
-              background);
+  // Two labelled bars: what the part is running at, and how hard it is working.
+  drawStatRow(30, temperature ? "TEMP" : "USED", metric.shown,
+              temperature ? "C" : "%", ratio, calm, tone, now);
+  drawStatRow(44, index == 2 ? "DISK" : "LOAD", load.shown, "%", loadRatio, calm,
+              loadTone, now);
 
   card_.pushSprite(kMargin, y);
 }
 
 void BotDisplay::drawMetricCards(uint32_t now, bool volumeOverlay) {
-  drawMetricCard(0, kCardFirstY, "CPU TEMPERATURE", cpu_, "\xb0\x43",
-                 theme::kPrimary, true, now);
+  drawMetricCard(0, kCardFirstY, "CPU", cpu_, cpuLoad_, theme::kPrimary, true,
+                 now);
   // The overlay occupies this slot rather than being drawn on top of it.
   // Pushing both to the same region in one pass is what made the screen flicker
   // while the knob was moving.
   if (volumeOverlay) {
     drawVolumeOverlay(now);
   } else {
-    drawMetricCard(1, kCardFirstY + kCardSpacing, "GPU TEMPERATURE", gpu_,
-                   "\xb0\x43", theme::kSecondary, true, now);
+    drawMetricCard(1, kCardFirstY + kCardSpacing, "GPU", gpu_, gpuLoad_,
+                   theme::kSecondary, true, now);
   }
-  drawMetricCard(2, kCardFirstY + kCardSpacing * 2, "MEMORY IN USE", memory_,
-                 "%", theme::kTertiary, false, now, true);
+  // Memory has no temperature, so its second row carries the primary drive,
+  // which the telemetry already reports and nothing else on screen shows.
+  drawMetricCard(2, kCardFirstY + kCardSpacing * 2, "MEMORY", memory_, disk_,
+                 theme::kTertiary, false, now);
 }
 
 void BotDisplay::drawProvisioning() {
@@ -897,7 +926,7 @@ void BotDisplay::drawFooter(uint32_t now) {
   if (volumeKnown_) {
     // The knob's current position, so the level is readable without moving it.
     const uint8_t waves = volumeLevel_ >= 66 ? 3 : (volumeLevel_ >= 33 ? 2 : 1);
-    icons::speaker(footer_, kMargin, 3, 12, shade(theme::kTextSoft),
+    icons::speaker(footer_, kMargin + 6, 9, 12, shade(theme::kTextSoft),
                    shade(theme::kBevelDark), waves,
                    volumeMuted_ || volumeLevel_ == 0);
     char text[10];
@@ -910,7 +939,10 @@ void BotDisplay::drawFooter(uint32_t now) {
   }
   footer_.setTextDatum(TR_DATUM);
   footer_.setTextColor(theme::mix(shade(theme::kMuted), accent, 0.5f));
-  footer_.drawString("HOLD 2s - PC POWER", kScreenWidth - kMargin, 6, 1);
+  const char* hint = mood_ == BotMood::Provisioning ? "JOIN SETUP WI-FI" :
+      (mood_ == BotMood::Disconnected || mood_ == BotMood::Connecting) ?
+      "HOLD 5s - WI-FI SETUP" : "HOLD 2s - PC POWER";
+  footer_.drawString(hint, kScreenWidth - kMargin, 6, 1);
   footer_.setTextDatum(TL_DATUM);
   footer_.pushSprite(0, kFooterY);
 }

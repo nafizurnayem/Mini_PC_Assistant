@@ -50,7 +50,7 @@ void ClockScreen::drawChrome(TFT_eSPI& display, uint16_t accent) {
   const int16_t badgeX = kScreenWidth / 2 - badgeWidth / 2;
   theme::glassCard(display, badgeX, 24, badgeWidth, 26, 13,
                    theme::tone(theme::kBackdrop), accent, 0.5f);
-  icons::power(display, badgeX + 12, 30, 14, accent);
+  icons::power(display, badgeX + 19, 37, 14, accent);
   display.setTextDatum(TL_DATUM);
   display.setTextColor(theme::tone(theme::kTextSoft));
   display.drawString(badge, badgeX + 32, 29, 2);

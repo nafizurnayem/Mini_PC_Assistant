@@ -19,6 +19,7 @@ class OtaServer {
   void begin(const String& token, const String& version, const String& deviceId,
              ProgressHandler onProgress);
   void tick();
+  void stop();
   bool active() const { return uploading_; }
 
  private:

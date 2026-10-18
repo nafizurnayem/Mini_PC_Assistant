@@ -40,11 +40,12 @@ const char kPortalHtml[] PROGMEM = R"HTML(
   <div class="brand"><div class="mark"></div><div><h1>PICO <span class="tag">ASSISTANT</span></h1><div class="hint">SECURE DEVICE ONBOARDING</div></div></div>
   <div class="status">Connected directly to the assistant. Configure the destination Wi-Fi and private MQTT account, then the device will restart.</div>
   <form id="setup">
+    <label id="wifiOnlyRow" hidden><input id="wifiOnly" type="checkbox" style="width:auto"> Change Wi-Fi only — keep cloud and PC settings</label>
     <section><h2>01 // WI-FI LINK</h2><div class="grid">
       <label>Network name (SSID)<input id="wifiSsid" name="wifiSsid" list="networks" autocomplete="off" required></label>
       <label>Wi-Fi password<input name="wifiPassword" type="password" autocomplete="new-password"></label>
     </div><datalist id="networks"></datalist><button class="scan" id="scan" type="button">SCAN NETWORKS</button></section>
-    <section><h2>02 // DEVICE</h2><div class="grid">
+    <section id="deviceSettings"><h2>02 // DEVICE</h2><div class="grid">
       <label>Device ID<input name="deviceId" value="desktop-01" required pattern="[A-Za-z0-9_-]{2,32}"></label>
       <label>PC MAC address<input name="pcMac" placeholder="AA:BB:CC:DD:EE:FF" required></label>
       <label>LAN broadcast IP<input name="broadcastIp" value="255.255.255.255" required></label>
@@ -64,7 +65,7 @@ const char kPortalHtml[] PROGMEM = R"HTML(
       <option value="JST-9">Japan</option>
       <option value="AEST-10AEDT,M10.1.0,M4.1.0/3">Sydney</option>
     </datalist></section>
-    <section><h2>03 // MQTT CLOUD</h2><div class="grid">
+    <section id="cloudSettings"><h2>03 // MQTT CLOUD</h2><div class="grid">
       <label>Broker host<input name="mqttHost" placeholder="cluster.hivemq.cloud" required></label>
       <label>TLS port<input name="mqttPort" type="number" value="8883" min="1" max="65535" required></label>
       <label>MQTT username<input name="mqttUsername" autocomplete="username" required></label>
@@ -75,9 +76,12 @@ const char kPortalHtml[] PROGMEM = R"HTML(
   </form>
   <script>
     const form=document.querySelector('#setup'),result=document.querySelector('#result'),save=document.querySelector('#save');
-    fetch('/api/config').then(r=>r.json()).then(c=>Object.entries(c).forEach(([k,v])=>{const e=form.elements[k];if(e&&v!==null&&v!=='')e.value=v})).catch(()=>{});
+    const wifiOnly=document.querySelector('#wifiOnly');
+    function mode(){for(const id of ['deviceSettings','cloudSettings']){const section=document.getElementById(id);section.hidden=wifiOnly.checked;section.querySelectorAll('input,textarea').forEach(e=>e.disabled=wifiOnly.checked)}save.textContent=wifiOnly.checked?'SAVE WI-FI & RESTART':'SAVE CONFIGURATION & RESTART'}
+    wifiOnly.onchange=mode;
+    fetch('/api/config').then(r=>r.json()).then(c=>{Object.entries(c).forEach(([k,v])=>{const e=form.elements[k];if(e&&v!==null&&v!=='')e.value=v});document.querySelector('#wifiOnlyRow').hidden=!c.wifiOnlyAvailable;wifiOnly.checked=!!c.wifiOnlyAvailable;mode()}).catch(()=>{});
     document.querySelector('#scan').onclick=async e=>{e.target.disabled=true;e.target.textContent='SCANNING...';try{let a=null;for(let i=0;i<24;i++){const r=await fetch('/api/scan');if(r.status===202){await new Promise(v=>setTimeout(v,500));continue}if(!r.ok)throw Error('scan failed');a=await r.json();break}if(!a)throw Error('scan timeout');const d=document.querySelector('#networks');d.innerHTML='';a.networks.forEach(n=>{const o=document.createElement('option');o.value=n.ssid;o.label=n.rssi+' dBm '+(n.secure?'secured':'open');d.appendChild(o)});result.className='result ok';result.textContent=a.networks.length+' networks found. Select or type your SSID.'}catch(x){result.className='result bad';result.textContent='Scan failed. Enter the SSID manually.'}finally{e.target.disabled=false;e.target.textContent='SCAN NETWORKS'}};
-    form.onsubmit=async e=>{e.preventDefault();save.disabled=true;save.textContent='VALIDATING...';result.className='result';try{const r=await fetch('/api/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});const j=await r.json();if(!r.ok)throw Error(j.message||j.status);result.className='result ok';result.textContent='Saved. The bot is restarting and this setup network will close.';save.textContent='CONFIGURATION SAVED'}catch(x){result.className='result bad';result.textContent=x.message;save.disabled=false;save.textContent='SAVE CONFIGURATION & RESTART'}};
+    form.onsubmit=async e=>{e.preventDefault();save.disabled=true;save.textContent='VALIDATING...';result.className='result';try{const r=await fetch(wifiOnly.checked?'/api/wifi':'/api/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(new FormData(form))});const j=await r.json();if(!r.ok)throw Error(j.message||j.status);result.className='result ok';result.textContent='Saved. The bot is restarting and this setup network will close.';save.textContent='CONFIGURATION SAVED'}catch(x){result.className='result bad';result.textContent=x.message;save.disabled=false;save.textContent='SAVE CONFIGURATION & RESTART'}};
   </script>
 </main></body></html>
 )HTML";
@@ -125,32 +129,39 @@ bool Provisioner::applyConfigJson(const String& json, String& status) {
     status = "invalid-json";
     return false;
   }
-  config_->deviceId = doc["deviceId"] | config_->deviceId;
-  config_->wifiSsid = doc["wifiSsid"] | "";
-  config_->wifiPassword = doc["wifiPassword"] | "";
-  config_->mqttHost = doc["mqttHost"] | "";
+  if (!doc.is<JsonObject>()) {
+    status = "invalid-json";
+    return false;
+  }
+  // Stage changes: a rejected request must not corrupt the saved/live config.
+  DeviceConfig candidate = *config_;
+  candidate.deviceId = doc["deviceId"] | config_->deviceId;
+  candidate.wifiSsid = doc["wifiSsid"] | config_->wifiSsid;
+  candidate.wifiPassword = doc["wifiPassword"] | config_->wifiPassword;
+  candidate.mqttHost = doc["mqttHost"] | config_->mqttHost;
   const int mqttPort = doc["mqttPort"] | static_cast<int>(config_->mqttPort);
   if (mqttPort < 1 || mqttPort > 65535) {
     status = "invalid-config";
     return false;
   }
-  config_->mqttPort = static_cast<uint16_t>(mqttPort);
-  config_->mqttUsername = doc["mqttUsername"] | "";
-  config_->mqttPassword = doc["mqttPassword"] | config_->mqttPassword;
-  config_->pcMac = doc["pcMac"] | "";
-  config_->broadcastIp = doc["broadcastIp"] | "255.255.255.255";
-  config_->rootCa = doc["rootCa"] | config_->rootCa;
-  config_->timezone = doc["timezone"] | config_->timezone;
-  if (config_->timezone.isEmpty()) config_->timezone = "UTC0";
-  const String err = config_->validationError();
+  candidate.mqttPort = static_cast<uint16_t>(mqttPort);
+  candidate.mqttUsername = doc["mqttUsername"] | config_->mqttUsername;
+  candidate.mqttPassword = doc["mqttPassword"] | config_->mqttPassword;
+  candidate.pcMac = doc["pcMac"] | config_->pcMac;
+  candidate.broadcastIp = doc["broadcastIp"] | config_->broadcastIp;
+  candidate.rootCa = doc["rootCa"] | config_->rootCa;
+  candidate.timezone = doc["timezone"] | config_->timezone;
+  if (candidate.timezone.isEmpty()) candidate.timezone = "UTC0";
+  const String err = candidate.validationError();
   if (!err.isEmpty()) {
     status = err;
     return false;
   }
-  if (!store_->save(*config_)) {
+  if (!store_->save(candidate)) {
     status = "Save failed — check NVS storage";
     return false;
   }
+  *config_ = candidate;
   status = "saved-rebooting";
   rebootRequested_ = true;
   return true;
@@ -173,6 +184,13 @@ void Provisioner::startAccessPoint() {
   dnsServer_.start(53, "*", WiFi.softAPIP());
 }
 
+bool Provisioner::wifiOnlyAvailable() const {
+  DeviceConfig candidate = *config_;
+  candidate.wifiSsid = "setup";
+  candidate.wifiPassword = "";
+  return candidate.ready();
+}
+
 void Provisioner::handleConfig() {
   JsonDocument doc;
   doc["deviceId"] = config_->deviceId;
@@ -183,10 +201,13 @@ void Provisioner::handleConfig() {
   doc["pcMac"] = config_->pcMac;
   doc["broadcastIp"] = config_->broadcastIp;
   doc["timezone"] = config_->timezone;
+  doc["wifiOnlyAvailable"] = wifiOnlyAvailable();
+  doc["firmwareVersion"] = BoardConfig::kFirmwareVersion;
   String payload;
   serializeJson(doc, payload);
   webServer_.send(200, "application/json", payload);
 }
+
 
 void Provisioner::handleScan() {
   int count = WiFi.scanComplete();
@@ -254,6 +275,30 @@ void Provisioner::redirectToPortal() {
   webServer_.send(302, "text/plain", "");
 }
 
+void Provisioner::handleWifiSave() {
+  if (!wifiOnlyAvailable()) {
+    webServer_.send(409, "application/json",
+                    "{\"message\":\"Cloud settings are missing. Complete full setup in the browser.\"}");
+    return;
+  }
+  if (!webServer_.hasArg("wifiSsid") || !webServer_.hasArg("wifiPassword")) {
+    webServer_.send(400, "application/json", "{\"message\":\"SSID and password fields are required\"}");
+    return;
+  }
+  JsonDocument doc;
+  doc["wifiSsid"] = webServer_.arg("wifiSsid");
+  doc["wifiPassword"] = webServer_.arg("wifiPassword");
+  String json, status;
+  serializeJson(doc, json);
+  const bool saved = applyConfigJson(json, status);
+  JsonDocument response;
+  response["status"] = saved ? "saved-rebooting" : "invalid-config";
+  response["message"] = status;
+  String payload;
+  serializeJson(response, payload);
+  webServer_.send(saved ? 200 : 400, "application/json", payload);
+}
+
 void Provisioner::startWebPortal() {
   webServer_.on("/", HTTP_GET, [this]() {
     webServer_.send_P(200, "text/html", kPortalHtml);
@@ -261,6 +306,7 @@ void Provisioner::startWebPortal() {
   webServer_.on("/api/config", HTTP_GET, [this]() { handleConfig(); });
   webServer_.on("/api/scan", HTTP_GET, [this]() { handleScan(); });
   webServer_.on("/api/save", HTTP_POST, [this]() { handleSave(); });
+  webServer_.on("/api/wifi", HTTP_POST, [this]() { handleWifiSave(); });
   webServer_.on("/generate_204", HTTP_GET, [this]() { redirectToPortal(); });
   webServer_.on("/hotspot-detect.html", HTTP_GET,
                 [this]() { redirectToPortal(); });
@@ -270,6 +316,7 @@ void Provisioner::startWebPortal() {
 }
 
 void Provisioner::begin(DeviceConfig* config, ConfigStore* store) {
+  if (active_) return;
   config_ = config;
   store_ = store;
   owner = this;
@@ -283,7 +330,11 @@ void Provisioner::begin(DeviceConfig* config, ConfigStore* store) {
                          .c_str());
   NimBLEDevice::setSecurityAuth(true, true, true);
   auto* server = NimBLEDevice::createServer();
+  server->advertiseOnDisconnect(true);
   auto* service = server->createService(BoardConfig::kBleServiceUuid);
+  auto* infoCharacteristic = service->createCharacteristic(
+      BoardConfig::kBleInfoUuid, NIMBLE_PROPERTY::READ);
+  infoCharacteristic->setValue("wifi-only-v1");
   auto* configCharacteristic = service->createCharacteristic(
       BoardConfig::kBleConfigUuid, NIMBLE_PROPERTY::WRITE_ENC);
   statusCharacteristic = service->createCharacteristic(
@@ -293,6 +344,8 @@ void Provisioner::begin(DeviceConfig* config, ConfigStore* store) {
   auto* advertising = NimBLEDevice::getAdvertising();
   advertising->addServiceUUID(BoardConfig::kBleServiceUuid);
   advertising->enableScanResponse(true);
+  advertising->setName((String(BoardConfig::kProductFullName) + " " +
+                        config->deviceId).substring(0, 29).c_str());
   advertising->start();
   active_ = true;
 }

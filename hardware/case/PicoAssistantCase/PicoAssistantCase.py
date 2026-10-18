@@ -5,7 +5,7 @@ Pico Assistant - tilting L-base case generator for Fusion 360
 
 Builds a complete, printable enclosure for:
 
-  * 3.2" ILI9341 SPI TFT, 240x320, portrait   (geometry taken from 320x240.step)
+  * 3.2" ILI9341 SPI TFT, 240x320, portrait   (geometry taken from ../reference/display.step)
   * ESP32-S3 Super Mini
   * TTP223 capacitive touch module (senses through the front wall)
   * EC11 rotary encoder (volume), shaft up through the top wall

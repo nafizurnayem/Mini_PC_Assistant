@@ -36,16 +36,74 @@ public sealed class HardwareMonitor : IDisposable
 
     private Metric ReadMetric(params HardwareType[] types)
     {
-        var hardware = AllHardware().Where(h => types.Contains(h.HardwareType)).ToArray();
-        var temperatures = hardware.SelectMany(h => h.Sensors)
-            .Where(s => s.SensorType == SensorType.Temperature && s.Value.HasValue)
-            .Select(s => (double)s.Value!.Value).ToArray();
-        var loads = hardware.SelectMany(h => h.Sensors)
-            .Where(s => s.SensorType == SensorType.Load && s.Value.HasValue &&
-                        (s.Name.Contains("Total", StringComparison.OrdinalIgnoreCase) || hardware.Length == 1))
-            .Select(s => (double)s.Value!.Value).ToArray();
-        return new Metric(temperatures.Length == 0 ? null : temperatures.Max(),
-            loads.Length == 0 ? null : loads.Max());
+        var candidates = AllHardware()
+            .Where(h => types.Contains(h.HardwareType))
+            .OrderByDescending(Preference)
+            .ToArray();
+
+        // Take the first device that actually reports something. A machine with
+        // a discrete card usually lists the integrated GPU too, and that one
+        // often has no sensors at all.
+        foreach (var hardware in candidates)
+        {
+            var sensors = hardware.Sensors;
+            var temperature = PickSensor(sensors, SensorType.Temperature,
+                "GPU Core", "CPU Package", "Core (Tctl/Tdie)", "GPU Hot Spot", "Core");
+            var load = PickSensor(sensors, SensorType.Load,
+                "GPU Core", "CPU Total", "Total", "Core");
+            if (temperature is not null || load is not null) return new Metric(temperature, load);
+        }
+        return new Metric();
+    }
+
+    /// <summary>
+    /// Ranks devices by how completely they report themselves, because the
+    /// hardware type cannot separate a discrete card from an integrated one:
+    /// an AMD APU's built-in graphics is also HardwareType.GpuAmd. A discrete
+    /// card exposes a "GPU Core" temperature and its own memory sensors, which
+    /// integrated graphics generally does not.
+    /// </summary>
+    private static int Preference(IHardware hardware)
+    {
+        var score = hardware.HardwareType == HardwareType.GpuIntel ? -1 : 0;
+        foreach (var sensor in hardware.Sensors)
+        {
+            if (!sensor.Value.HasValue) continue;
+            var isCore = sensor.Name.Contains("GPU Core", StringComparison.OrdinalIgnoreCase);
+            if (sensor.SensorType == SensorType.Temperature && isCore) score += 4;
+            else if (sensor.SensorType == SensorType.Load && isCore) score += 2;
+            else if (sensor.Name.Contains("GPU Memory", StringComparison.OrdinalIgnoreCase)) score += 1;
+        }
+        return score;
+    }
+
+    /// <summary>
+    /// Picks one reading by name preference, falling back to the highest value
+    /// of that type. NVIDIA names its load sensors "GPU Core", "GPU Memory
+    /// Controller", "GPU Video Engine" and so on — none of them contain "Total",
+    /// which is why a name filter alone silently reports nothing. Taking the
+    /// maximum instead would report a busy video encoder as overall GPU load,
+    /// so the preferred names come first.
+    /// </summary>
+    private static double? PickSensor(IEnumerable<ISensor> sensors, SensorType type,
+        params string[] preferredNames)
+    {
+        var readable = sensors
+            .Where(s => s.SensorType == type && s.Value.HasValue && !float.IsNaN(s.Value!.Value))
+            // A temperature of exactly zero means the driver could not read the
+            // sensor, not that the part is at freezing point. Reporting it would
+            // put a confident 0 C on the display instead of an honest "--".
+            .Where(s => type != SensorType.Temperature || s.Value!.Value > 0f)
+            .ToArray();
+        if (readable.Length == 0) return null;
+
+        foreach (var name in preferredNames)
+        {
+            var match = readable.FirstOrDefault(s =>
+                s.Name.Contains(name, StringComparison.OrdinalIgnoreCase));
+            if (match is not null) return match.Value!.Value;
+        }
+        return readable.Max(s => (double)s.Value!.Value);
     }
 
     private static MemoryMetric ReadMemory()

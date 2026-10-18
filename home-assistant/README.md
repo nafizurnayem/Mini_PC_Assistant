@@ -15,7 +15,7 @@ topic and unique ID before startup if the bot uses another device ID. It creates
 online-state, CPU/GPU/load/RAM/network/uptime entities, speed-test results,
 latest-alert state, safe non-retained QoS 1 command scripts, reset buttons, a
 template power switch, and a YAML command-center dashboard. Power-off is still
-executed only by the Windows agent.
+executed by the Windows or Linux agent on the PC.
 
 Copy `.env.example` to `.env`; never edit the example with real values. The
 optional `google_assistant.example.yaml` is intentionally not loaded by default

@@ -33,6 +33,9 @@ struct DeviceConfig {
       }
     }
     if (wifiSsid.isEmpty()) return "Wi-Fi SSID is required";
+    if (wifiSsid.length() > 32) return "Wi-Fi SSID must be at most 32 bytes";
+    if (!wifiPassword.isEmpty() && (wifiPassword.length() < 8 || wifiPassword.length() > 63))
+      return "Wi-Fi password must be 8-63 characters (empty only for an open network)";
     if (mqttHost.isEmpty()) return "MQTT broker host is required";
     if (mqttPort == 0) return "MQTT TLS port is invalid";
     if (mqttUsername.isEmpty()) return "MQTT username is required";

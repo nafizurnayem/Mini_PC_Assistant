@@ -1,71 +1,101 @@
-# Pico Assistant
+# Pico Assistant 🤖
 
-Pico Assistant is a physical and remote control system for a Windows PC. An
-ESP32-S3 drives a 3.2-inch ILI9341 display, handles local Wake-on-LAN, and
-provides touch/buzzer feedback. A Windows service publishes hardware telemetry
-and performs graceful shutdown. Flutter and Home Assistant provide remote
-control through a TLS MQTT broker.
+**Pico Assistant** is an ESP32-powered desk companion for your computer. It sits under your monitor, displays real-time PC telemetry (CPU/GPU temperatures, memory and network usage, and currently playing media), and lets you power your PC on or off with a touch sensor and adjust volume with a dial.
 
-The MQTT topic namespace (`pcbot/v1/...`), Windows service name, and mobile
-package identifiers intentionally keep their original names so existing
-installations keep working after the rename.
+Works seamlessly with **Ubuntu Linux** and **Windows 10/11**, with an optional **mobile app** (Android/iOS) and **Home Assistant** integration.
 
-## Repository
+---
 
-| Component | Purpose | Validation |
+## ✨ Features
+
+- **Live PC Dashboard**: 3.2" color screen displaying CPU/GPU temperatures & load, RAM usage, network throughput, and media playback.
+- **One-Touch Power Control**: Built-in Wake-on-LAN (WoL) turns your PC on remotely with a touch gesture, plus graceful shutdown support.
+- **Smooth Volume Knob**: Dedicated physical rotary dial for instant PC master volume adjustments.
+- **Smart Standby Clock**: Automatically transitions to a sleek digital desk clock when your PC is powered off.
+- **Audio & Visual Alerts**: Buzzer sounds and visual warnings for critical system temperatures or high memory usage.
+- **Cloud & Local Connectivity**: Communicates securely over TLS via MQTT (free cloud brokers like HiveMQ Cloud supported).
+- **Mobile Companion App**: Monitor stats, run speed tests, and control power right from your phone.
+- **Home Assistant Ready**: Pre-built Lovelace dashboards and automation packages included.
+
+---
+
+## 🛠️ Hardware Requirements
+
+To build the physical desk bot, you will need:
+
+| Component | Recommended Model | Note |
 |---|---|---|
-| `firmware/` | ESP32-S3 display, touch, provisioning, TLS MQTT, WOL | PlatformIO build and physical boot |
-| `windows/` | Telemetry service, alerts, shutdown, speed test, control panel | .NET Release build and behavior tests |
-| `mobile/` | Android/iOS dashboard and encrypted BLE provisioning | Dart analysis and Flutter tests |
-| `home-assistant/` | HTTPS container deployment, dashboard, MQTT entities/actions | YAML and contract tests |
-| `contracts/` | Versioned MQTT topics and command envelope | Node tests and validator |
+| **Microcontroller** | ESP32-S3 N4R2 (Super Mini) | 4 MB Flash, 2 MB PSRAM |
+| **Display** | 3.2" ILI9341 SPI TFT (240×320) | Driven in portrait orientation |
+| **Touch Button** | TTP223 Capacitive Touch Sensor | Mounts invisibly behind front wall |
+| **Buzzer** | 5V / 3.3V Passive Buzzer | For audio alerts and haptic feedback |
+| **Volume Knob** | 10 kΩ Potentiometer or EC11 Encoder | (Optional) Analog or digital volume dial |
+| **Case** | 3D-printed enclosure | [Print files & CAD included](hardware/) |
 
-## Hardware
+> **Note:** Your PC must be connected via Ethernet with **Wake-on-LAN (WoL)** enabled in BIOS/UEFI to allow the bot to turn it on from an off state.
 
-- ESP32-S3 N4R2: 4 MB flash and 2 MB PSRAM
-- ILI9341 320×240 SPI TFT: CS 10, MOSI 11, SCLK 12, DC 7, RST 6
-- TTP223 touch input: GPIO 4
-- Buzzer: GPIO 2
+---
 
-See [firmware/README.md](firmware/README.md) for safe wiring and backlight notes.
+## 🚀 Quick Start Guide
 
-## MQTT choice
+Setting up Pico Assistant takes four simple steps:
 
-Use [HiveMQ Cloud Serverless Free](https://www.hivemq.com/products/mqtt-cloud-broker/)
-for the normal installation. It provides TLS, authorization rules, up to 100
-connections, and 10 GB monthly traffic without a credit card, but has no uptime
-SLA. Create separate credentials for the ESP32, Windows agent, mobile app, and
-Home Assistant.
+### 1. Set Up an MQTT Broker
+The bot and PC communicate through a secure MQTT broker.
+- Create a free cloud broker at [HiveMQ Cloud](https://www.hivemq.com/cloud/) (or host your own via Mosquitto).
+- Create separate credentials for the **Bot**, **PC**, and **Phone**.
+- Choose a shared Device ID (e.g., `desktop-01`).
 
-An old Android phone running Termux can host an experimental local broker, but
-it is not recommended for this system's remote control path: Android background
-limits, changing LAN addresses, battery failure, TLS certificate management,
-and router exposure make it less reliable and less secure. Keep the phone
-option for LAN-only testing; do not forward an unencrypted MQTT port.
+### 2. Flash & Assemble the Bot
+- Flash the ESP32-S3 firmware using the [Firmware Guide](firmware/README.md).
+- On first boot, connect your phone or laptop to the bot's Wi-Fi hotspot (`PICO-xxxxxx`).
+- Open `http://192.168.4.1` in your browser to enter your Wi-Fi details, MQTT credentials, and PC MAC address.
 
-## Deployment order
+### 3. Install the PC Agent
+Run the native companion client on your computer:
+- **Windows**: Follow the [Windows Guide](windows/README.md) to install the background service and system tray app.
+- **Linux**: Follow the [Linux Guide](linux/README.md) to set up the lightweight background daemon and status app.
 
-1. Create the MQTT broker and dedicated credentials.
-2. Power the ESP32 and connect to the TFT-displayed `PICO-xxxxxx` hotspot.
-3. Open `http://192.168.4.1`, enter Wi-Fi, time zone, MQTT TLS, MAC, and
-   broadcast details.
-4. Build and open the Windows control panel, save its dedicated credential, and
-   install the service from an elevated terminal.
-5. Build/install the Flutter app or use Home Assistant.
-6. Deploy `home-assistant/compose.yaml` on the Oracle VM and configure its
-   dedicated MQTT credential through Home Assistant.
+### 4. Optional: Mobile App & Home Assistant
+- **Mobile App**: Install the Flutter phone app to check stats and control power anywhere on your home network ([Mobile Guide](mobile/README.md)).
+- **Home Assistant**: Drop in the pre-configured package and Lovelace dashboard ([Home Assistant Guide](home-assistant/README.md)).
 
-Detailed commands and external account steps are in
-[DEPLOYMENT.md](DEPLOYMENT.md).
+For comprehensive deployment instructions, check out the [Full Setup Guide](docs/setup.md).
 
-## Verify
+---
 
-Run from PowerShell:
+## 🕹️ Everyday Controls
 
-```powershell
-.\verify.ps1
+- **Short Tap Touch Pad**: Wake screen / dismiss active alert.
+- **Hold Touch Pad for 2 Seconds**: Power ON the PC (via Wake-on-LAN) or request safe shutdown.
+- **Turn Knob**: Smoothly adjust master system volume up or down.
+- **Hold Touch Pad for 5 Seconds on Boot**: Reset Wi-Fi credentials to enter setup hotspot mode (preserves your MQTT keys).
+
+---
+
+## 📂 Project Structure
+
+```
+├── firmware/         # ESP32-S3 C++ firmware, display drivers & captive portal
+├── windows/          # Windows .NET 8 background service & system tray app
+├── linux/            # Linux Python daemon, system tray monitor & installer
+├── mobile/           # Cross-platform Flutter companion app (Android & iOS)
+├── hardware/         # 3D-printable case, Fusion 360 parametric CAD & diagrams
+├── home-assistant/   # Docker Compose stack, YAML packages & Lovelace dashboard
+├── contracts/        # Standard MQTT message specifications & JSON schemas
+├── docs/             # Comprehensive deployment & development documentation
+├── tests/            # Protocol, contract, and recovery automated test suites
+└── tools/            # Verification & validation scripts
 ```
 
-The script validates contracts/YAML, builds firmware and Windows projects, runs
-Windows behavior tests, and analyzes/tests Flutter when the local SDK is
-available.
+---
+
+## 💻 Development & Contributing
+
+- Run validation and contract checks:
+  ```bash
+  npm test
+  npm run validate
+  python3 tools/validate-yaml.py
+  ```
+- See the [Development Guide](docs/development.md) for full testing workflows and coding guidelines.

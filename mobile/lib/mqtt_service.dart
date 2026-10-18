@@ -22,6 +22,19 @@ String formatUtcSeconds(DateTime value) {
 
 class MqttService {
   MqttServerClient? _client;
+  bool _telemetryEnabled = true;
+  String? _telemetryTopic;
+
+  void setTelemetryEnabled(bool enabled) {
+    _telemetryEnabled = enabled;
+    final topic = _telemetryTopic;
+    if (!connected || topic == null) return;
+    if (enabled) {
+      _client!.subscribe(topic, MqttQos.atLeastOnce);
+    } else {
+      _client!.unsubscribe(topic);
+    }
+  }
   StreamSubscription? _subscription;
   final _messages = StreamController<TopicMessage>.broadcast();
   final _connection = StreamController<bool>.broadcast();
@@ -32,6 +45,7 @@ class MqttService {
 
   Future<void> connect(AppSettings settings) async {
     await disconnect();
+    _telemetryTopic = '${settings.rootTopic}/telemetry/system';
     final client = MqttServerClient.withPort(
       settings.host,
       'pcbot-mobile-${const Uuid().v4()}',
@@ -43,6 +57,21 @@ class MqttService {
       ..resubscribeOnAutoReconnect = true
       ..logging(on: false)
       ..onConnected = () {
+        _connection.add(true);
+      }
+      ..onSubscribed = (topic) {
+        // The app can be backgrounded before the broker acknowledges a
+        // subscription. Unsubscribe once it becomes active in that case.
+        if (topic == _telemetryTopic && !_telemetryEnabled) {
+          setTelemetryEnabled(false);
+        }
+      }
+      ..onAutoReconnect = () {
+        _connection.add(false);
+      }
+      ..onAutoReconnected = () {
+        // Foreground state may have changed while the socket was offline.
+        setTelemetryEnabled(_telemetryEnabled);
         _connection.add(true);
       }
       ..onDisconnected = () {
@@ -59,9 +88,10 @@ class MqttService {
     if (result?.state != MqttConnectionState.connected) {
       throw StateError('MQTT connection failed: ${result?.returnCode}');
     }
-    for (final suffix in ['state/pc', 'state/bot', 'state/speedtest', 'telemetry/system', 'event/alert', 'event/ack']) {
+    for (final suffix in ['state/pc', 'state/bot', 'state/speedtest', 'event/alert']) {
       client.subscribe('${settings.rootTopic}/$suffix', MqttQos.atLeastOnce);
     }
+    setTelemetryEnabled(_telemetryEnabled);
     _subscription = client.updates?.listen((events) {
       for (final event in events) {
         final message = event.payload as MqttPublishMessage;

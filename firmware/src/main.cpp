@@ -11,6 +11,7 @@
 #include "DeviceConfig.h"
 #include "OtaServer.h"
 #include "Provisioner.h"
+#include "WifiRecovery.h"
 
 namespace {
 DeviceConfig config;
@@ -22,6 +23,7 @@ MQTTClient mqtt(2048);
 WiFiUDP udp;
 OtaServer ota;
 bool otaStarted = false;
+WifiRecovery wifiRecovery;
 
 String rootTopic;
 bool pcOnline = false;
@@ -32,6 +34,7 @@ struct TouchState {
   bool raw = false;
   bool stable = false;
   bool holdFired = false;
+  bool recoveryHold = false;
   uint32_t lastEdge = 0;
   uint32_t pressedAt = 0;
 };
@@ -211,8 +214,11 @@ void onMessage(String& incomingTopic, String& payload) {
   if (incomingTopic == topic("telemetry/system")) {
     lastTelemetry = millis();
     bot.setMetrics(doc["cpu"]["temperatureC"] | NAN,
+                   doc["cpu"]["loadPercent"] | NAN,
                    doc["gpu"]["temperatureC"] | NAN,
-                   doc["memory"]["usedPercent"] | NAN);
+                   doc["gpu"]["loadPercent"] | NAN,
+                   doc["memory"]["usedPercent"] | NAN,
+                   doc["storage"][0]["usedPercent"] | NAN);
     bot.setNetwork(doc["network"]["downloadMbps"] | NAN,
                    doc["network"]["uploadMbps"] | NAN,
                    WiFi.status() == WL_CONNECTED
@@ -383,6 +389,22 @@ bool touchIsActive() {
   return BoardConfig::kTouchActiveHigh ? level == HIGH : level == LOW;
 }
 
+void enterWifiSetup() {
+  if (provisioner.active()) return;
+  applyPowerProfile(true);
+  if (mqtt.connected()) mqtt.disconnect();
+  tlsClient.stop();
+  ota.stop();  // Release port 80 before the captive portal starts.
+  otaStarted = false;
+  WiFi.setAutoReconnect(false);
+  WiFi.disconnect();
+  bot.setMood(BotMood::Provisioning, "Update Wi-Fi below");
+  provisioner.begin(&config, &configStore);
+  bot.setProvisioningInfo(provisioner.apSsid(), provisioner.apPassword(),
+                          provisioner.setupUrl());
+  Serial.println("[wifi] recovery setup active; existing settings preserved");
+}
+
 void onTouchHold() {
   // Power control needs a broker session, so during setup the hold only
   // explains itself instead of silently doing nothing.
@@ -390,7 +412,7 @@ void onTouchHold() {
     beep(900, 120);
     return;
   }
-  if (!mqtt.connected()) {
+  if (WiFi.status() != WL_CONNECTED || !mqtt.connected()) {
     bot.setMood(BotMood::Disconnected, "No link for power control");
     beep(900, 120);
     return;
@@ -402,6 +424,7 @@ void onTouchHold() {
 }
 
 void onTouchTap() {
+  if (provisioner.active()) return;
   bot.setMood(BotMood::Petted);
   beep(2200, 70);
   Serial.println("[pico] tap");
@@ -454,6 +477,7 @@ void handleTouch(uint32_t now) {
     if (raw) {
       touch.pressedAt = now;
       touch.holdFired = false;
+      touch.recoveryHold = (WiFi.status() != WL_CONNECTED || !mqtt.connected()) && !provisioner.active();
       bot.noteActivity(now);
       beep(2600, 18);
     } else {
@@ -465,11 +489,17 @@ void handleTouch(uint32_t now) {
   float progress = 0.0f;
   if (touch.stable) {
     const uint32_t heldFor = now - touch.pressedAt;
-    progress = static_cast<float>(heldFor) / BoardConfig::kTouchHoldMs;
+    const uint32_t threshold = touch.recoveryHold ? BoardConfig::kWifiSetupHoldMs : BoardConfig::kTouchHoldMs;
+    progress = static_cast<float>(heldFor) / threshold;
     if (progress > 1.0f) progress = 1.0f;
-    if (!touch.holdFired && heldFor >= BoardConfig::kTouchHoldMs) {
+    if (!touch.holdFired && heldFor >= threshold) {
       touch.holdFired = true;
-      onTouchHold();
+      if (touch.recoveryHold) {
+        enterWifiSetup();
+        beep(1800, 250);
+      } else {
+        onTouchHold();
+      }
     }
   }
   bot.setTouch(touch.stable, progress);
@@ -575,8 +605,13 @@ void loop() {
     return;
   }
 
-  if (WiFi.status() != WL_CONNECTED) {
-    bot.setMood(BotMood::Disconnected, "Wi-Fi offline");
+  const bool wifiConnected = WiFi.status() == WL_CONNECTED;
+  if (wifiRecovery.update(wifiConnected, now, BoardConfig::kWifiSetupAfterMs)) {
+    enterWifiSetup();
+    return;
+  }
+  if (!wifiConnected) {
+    bot.setMood(BotMood::Disconnected, "Hold 5s: Wi-Fi setup");
     if (now - lastWifiAttempt >= BoardConfig::kWifiRetryMs) {
       lastWifiAttempt = now;
       Serial.println("[wifi] retrying association");

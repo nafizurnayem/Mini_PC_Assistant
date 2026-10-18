@@ -33,7 +33,7 @@ test('saved configuration validates identity, MAC and TLS CA', () => {
   assert.match(config, /BEGIN CERTIFICATE/);
   assert.match(config, /END CERTIFICATE/);
   assert.match(config, /validMac/);
-  assert.match(config, /mqttPort > 0/);
+  assert.match(config, /mqttPort == 0/);
 });
 
 test('BLE provisioning is bounded and preserves stored MQTT secrets', () => {

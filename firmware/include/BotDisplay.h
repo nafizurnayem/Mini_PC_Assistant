@@ -34,7 +34,8 @@ class BotDisplay {
   BotDisplay();
   void begin();
   void setMood(BotMood mood, const String& message = "");
-  void setMetrics(float cpuTemp, float gpuTemp, float memoryPercent);
+  void setMetrics(float cpuTemp, float cpuLoad, float gpuTemp, float gpuLoad,
+                  float memoryPercent, float diskPercent);
   // Network throughput from PC telemetry plus the controller's own link
   // strength in dBm (0 means "not associated").
   void setNetwork(float downloadMbps, float uploadMbps, int16_t rssiDbm);
@@ -75,9 +76,12 @@ class BotDisplay {
   void drawTrace(const uint8_t* samples, int16_t plotX, int16_t plotY,
                  int16_t plotW, int16_t plotH, uint16_t color, bool filled,
                  uint32_t now);
+  // One labelled bar row inside a metric card.
+  void drawStatRow(int16_t y, const char* caption, float value, const char* unit,
+                   float ratio, uint16_t calm, uint16_t tone, uint32_t now);
   void drawMetricCard(uint8_t index, int16_t y, const char* label,
-                      const Metric& metric, const char* unit, uint16_t calm,
-                      bool temperature, uint32_t now, bool unitPrefix = false);
+                      const Metric& metric, const Metric& load, uint16_t calm,
+                      bool temperature, uint32_t now);
   void drawMetricCards(uint32_t now, bool volumeOverlay);
   void drawProvisioning();
   void drawFooter(uint32_t now);
@@ -108,8 +112,11 @@ class BotDisplay {
   BotMood preSleepMood_ = BotMood::Happy;
   String message_;
   Metric cpu_;
+  Metric cpuLoad_;
   Metric gpu_;
+  Metric gpuLoad_;
   Metric memory_;
+  Metric disk_;
   Metric download_;
   Metric upload_;
   String setupSsid_;
